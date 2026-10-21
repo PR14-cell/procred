@@ -188,6 +188,59 @@ describe('Phase 3: Credential & Expiration Tracking Module', () => {
       const res = calculateExpirationStatus(null, false, 'active');
       expect(res.computedStatus).toBe('pending_verification');
     });
+
+    // Exact Boundary Conditions Testing (90, 60, 30, 14, 0, -1 days)
+    it('should accurately handle exact alert window boundary days without off-by-one errors', () => {
+      const now = new Date();
+
+      // Helper to generate UTC target date exactly N days from UTC today
+      const getExactBoundaryDate = (days: number) => {
+        return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days, 12, 0, 0));
+      };
+
+      // Day -1 (Expired yesterday)
+      const minus1 = calculateExpirationStatus(getExactBoundaryDate(-1), true, 'active');
+      expect(minus1.alertWindow).toBe('expired');
+      expect(minus1.computedStatus).toBe('expired');
+
+      // Day 0 (Expires today) -> within 14 days
+      const day0 = calculateExpirationStatus(getExactBoundaryDate(0), true, 'active');
+      expect(day0.alertWindow).toBe('14_days');
+      expect(day0.computedStatus).toBe('expiring_soon');
+
+      // Day 14 -> exact boundary of 14_days window
+      const day14 = calculateExpirationStatus(getExactBoundaryDate(14), true, 'active');
+      expect(day14.alertWindow).toBe('14_days');
+
+      // Day 15 -> enters 30_days window
+      const day15 = calculateExpirationStatus(getExactBoundaryDate(15), true, 'active');
+      expect(day15.alertWindow).toBe('30_days');
+
+      // Day 30 -> exact boundary of 30_days window
+      const day30 = calculateExpirationStatus(getExactBoundaryDate(30), true, 'active');
+      expect(day30.alertWindow).toBe('30_days');
+
+      // Day 31 -> enters 60_days window
+      const day31 = calculateExpirationStatus(getExactBoundaryDate(31), true, 'active');
+      expect(day31.alertWindow).toBe('60_days');
+
+      // Day 60 -> exact boundary of 60_days window
+      const day60 = calculateExpirationStatus(getExactBoundaryDate(60), true, 'active');
+      expect(day60.alertWindow).toBe('60_days');
+
+      // Day 61 -> enters 90_days window
+      const day61 = calculateExpirationStatus(getExactBoundaryDate(61), true, 'active');
+      expect(day61.alertWindow).toBe('90_days');
+
+      // Day 90 -> exact boundary of 90_days window
+      const day90 = calculateExpirationStatus(getExactBoundaryDate(90), true, 'active');
+      expect(day90.alertWindow).toBe('90_days');
+
+      // Day 91 -> exceeds 90_days window, returns active without alert window
+      const day91 = calculateExpirationStatus(getExactBoundaryDate(91), true, 'active');
+      expect(day91.alertWindow).toBe(null);
+      expect(day91.computedStatus).toBe('active');
+    });
   });
 
   // ==========================================
@@ -453,6 +506,58 @@ describe('Phase 3: Credential & Expiration Tracking Module', () => {
       expect(linkedDocs.length).toBe(1);
       expect(linkedDocs[0].documentType).toBe('dea_certificate');
       expect(linkedDocs[0].entityId).toBe(dea!.id);
+    });
+  });
+
+  // ==========================================
+  // 10. Background Processing & Queue
+  // ==========================================
+  describe('Background Processing & BullMQ Queue Integration', () => {
+    it('should connect to Redis and schedule an idempotent expiration scan job', async () => {
+      const { expirationQueue } = await import('../src/lib/queue/expiration-queue');
+      const job = await expirationQueue.add(
+        'test-expiration-scan',
+        { test: true, timestamp: new Date().toISOString() },
+        { jobId: `test-scan-${Date.now()}` }
+      );
+      expect(job.id).toBeDefined();
+      expect(job.name).toBe('test-expiration-scan');
+
+      // Cleanup test job
+      await job.remove();
+    });
+  });
+
+  // ==========================================
+  // 11. Immutable Audit Protections Non-Regression
+  // ==========================================
+  describe('Audit Log Immutability Non-Regression', () => {
+    it('should reject UPDATE operations on audit_logs via PostgreSQL BEFORE trigger', async () => {
+      const log = await prisma.auditLog.create({
+        data: {
+          action: 'TEST_AUDIT_RECORD',
+          entityType: 'test',
+          userEmail: 'tester@example.com',
+        },
+      });
+
+      await expect(
+        prisma.$executeRaw`UPDATE audit_logs SET action = 'MUTATED' WHERE id = ${log.id}::uuid`
+      ).rejects.toThrow();
+    });
+
+    it('should reject DELETE operations on audit_logs via PostgreSQL BEFORE trigger', async () => {
+      const log = await prisma.auditLog.create({
+        data: {
+          action: 'TEST_DELETE_PROTECTION',
+          entityType: 'test',
+          userEmail: 'tester@example.com',
+        },
+      });
+
+      await expect(
+        prisma.$executeRaw`DELETE FROM audit_logs WHERE id = ${log.id}::uuid`
+      ).rejects.toThrow();
     });
   });
 });
