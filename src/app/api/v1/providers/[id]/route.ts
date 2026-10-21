@@ -52,6 +52,7 @@ export const GET = withErrorHandler(async (req: Request, context?: RouteContext)
         include: {
           payer: true,
           location: true,
+          assignedTo: { select: { firstName: true, lastName: true } },
         },
         orderBy: { updatedAt: 'desc' },
       },

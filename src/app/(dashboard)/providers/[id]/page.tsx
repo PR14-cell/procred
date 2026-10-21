@@ -144,9 +144,21 @@ interface ProviderProfile {
   verificationHistory: VerificationHistoryItem[];
   enrollments: Array<{
     id: string;
+    enrollmentType: 'individual' | 'group';
+    applicationType: string;
     status: string;
+    groupNumber: string | null;
+    groupNpi: string | null;
+    submittedDate: string | null;
     effectiveDate: string | null;
-    payer: { name: string };
+    revalidationDate: string | null;
+    followUpDate: string | null;
+    trackingNumber: string | null;
+    notes: string | null;
+    missingItems: Array<{ id: string; category: string; description: string; isResolved: boolean }> | null;
+    payer: { id: string; name: string; payerType: string | null; state: string | null };
+    location: { id: string; name: string; city: string; state: string } | null;
+    assignedTo: { firstName: string; lastName: string } | null;
   }>;
 }
 
@@ -1345,31 +1357,106 @@ export default function ProviderProfilePage() {
         </div>
       )}
 
-      {/* Tab 5: Payer Enrollments */}
+      {/* Tab 5: Payer Enrollments (Phase 4) */}
       {activeTab === 'enrollments' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
-          <div className="border-b border-slate-100 pb-3">
-            <h2 className="text-sm font-bold text-slate-900">Payer Enrollments ({provider.enrollments.length})</h2>
-            <p className="text-xs text-slate-500">Commercial and government insurance payer enrollments (Phase 3)</p>
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Payer Enrollments ({provider.enrollments.length})</h2>
+              <p className="text-xs text-slate-500">Commercial & government payer network participation (Individual & Group)</p>
+            </div>
+            <Link
+              href="/enrollments"
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+            >
+              Open Enrollment Work Queue →
+            </Link>
           </div>
 
           {provider.enrollments.length === 0 ? (
-            <div className="py-8 text-center text-slate-400 text-xs">
-              No payer enrollments created yet. Payer enrollment workflow is scheduled for Phase 3.
+            <div className="py-12 text-center text-slate-400 text-xs">
+              No payer enrollments recorded for this provider. Visit the Enrollment Work Queue to begin an application.
             </div>
           ) : (
-            <div className="space-y-2">
-              {provider.enrollments.map((enr) => (
-                <div key={enr.id} className="p-3 border rounded-lg text-xs flex justify-between items-center">
-                  <div>
-                    <span className="font-bold text-slate-800">{enr.payer.name}</span>
-                    <span className="ml-2 text-slate-500">Status: {enr.status}</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {provider.enrollments.map((enr) => {
+                const missing = enr.missingItems || [];
+                const openMissing = missing.filter((m) => !m.isResolved).length;
+
+                return (
+                  <div key={enr.id} className="p-4 border rounded-xl bg-slate-50/50 hover:bg-slate-50 transition space-y-2.5">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="font-bold text-slate-900 text-xs">{enr.payer.name}</div>
+                        <div className="text-[11px] text-slate-400 font-mono">
+                          {enr.payer.payerType || 'Commercial'} • {enr.payer.state || 'National'}
+                        </div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
+                        ['approved', 'active'].includes(enr.status)
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : enr.status === 'needs_info'
+                          ? 'bg-amber-100 text-amber-800'
+                          : enr.status === 'denied'
+                          ? 'bg-rose-100 text-rose-800'
+                          : 'bg-yellow-100 text-yellow-800'
+                      }`}>
+                        {enr.status.replace('_', ' ')}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center space-x-2 text-[11px]">
+                      {enr.enrollmentType === 'group' ? (
+                        <span className="px-1.5 py-0.2 rounded font-bold text-[10px] bg-indigo-100 text-indigo-800 font-mono">
+                          GROUP (NPI: {enr.groupNpi || 'None'})
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.2 rounded font-semibold text-[10px] bg-slate-200 text-slate-700">
+                          INDIVIDUAL
+                        </span>
+                      )}
+                      {enr.trackingNumber && (
+                        <span className="text-slate-400 font-mono text-[10px]">
+                          Ref: {enr.trackingNumber}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 pt-1 border-t border-slate-200/60">
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Effective Date</span>
+                        <span className="font-mono font-medium">
+                          {enr.effectiveDate ? new Date(enr.effectiveDate).toLocaleDateString() : 'Pending'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Next Follow-Up</span>
+                        <span className="font-mono font-medium">
+                          {enr.followUpDate ? new Date(enr.followUpDate).toLocaleDateString() : 'None set'}
+                        </span>
+                      </div>
+                      {enr.revalidationDate && (
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">Revalidation Due</span>
+                          <span className="font-mono font-medium text-purple-700">
+                            {new Date(enr.revalidationDate).toLocaleDateString()}
+                          </span>
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Missing Checklist</span>
+                        {openMissing > 0 ? (
+                          <span className="text-amber-700 font-semibold text-[10px]">
+                            ⚠ {openMissing} open items
+                          </span>
+                        ) : (
+                          <span className="text-emerald-700 text-[10px]">✓ All complete</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-slate-400 font-mono text-[11px]">
-                    Effective: {enr.effectiveDate ? new Date(enr.effectiveDate).toLocaleDateString() : 'Pending'}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

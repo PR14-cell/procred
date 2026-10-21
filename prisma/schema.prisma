@@ -288,6 +288,7 @@ model PayerEnrollment {
   providerPayerId         String?   @map("provider_payer_id") @db.VarChar(50)
   groupNumber             String?   @map("group_number") @db.VarChar(50)
   groupNpi                String?   @map("group_npi") @db.VarChar(10)
+  enrollmentType          String    @default("individual") @map("enrollment_type") @db.VarChar(20)
   applicationType         String    @default("initial") @map("application_type") @db.VarChar(50)
   status                  String    @default("not_started") @db.VarChar(30)
   submittedDate           DateTime? @map("submitted_date") @db.Date
@@ -300,6 +301,8 @@ model PayerEnrollment {
   trackingNumber          String?   @map("tracking_number") @db.VarChar(100)
   assignedToId            String?   @map("assigned_to") @db.Uuid
   createdById             String?   @map("created_by") @db.Uuid
+  notes                   String?
+  missingItems            Json?     @map("missing_items")
   createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
 

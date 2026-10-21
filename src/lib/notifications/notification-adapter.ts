@@ -9,6 +9,8 @@ export interface DispatchNotificationParams {
     | 'task_due'
     | 'caqh_attestation_due'
     | 'verification_needed'
+    | 'enrollment_status_change'
+    | 'enrollment_follow_up_due'
     | 'system_alert';
   title: string;
   message: string;
