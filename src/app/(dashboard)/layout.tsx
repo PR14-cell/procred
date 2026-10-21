@@ -24,9 +24,10 @@ export default function DashboardLayout({
   const navItems = [
     { label: 'Dashboard', href: '/dashboard', icon: '📊' },
     { label: 'Providers', href: '/providers', icon: '👤' },
-    { label: 'Enrollments', href: '/enrollments', icon: '📝', badge: 'Phase 3' },
-    { label: 'Documents', href: '/documents', icon: '📄', badge: 'Phase 3' },
-    { label: 'Tasks', href: '/tasks', icon: '✅', badge: 'Phase 4' },
+    { label: 'Credentials & Expirations', href: '/credentials', icon: '🛡️' },
+    { label: 'Enrollments', href: '/enrollments', icon: '📝', badge: 'Phase 5' },
+    { label: 'Documents', href: '/documents', icon: '📄', badge: 'Phase 4' },
+    { label: 'Tasks', href: '/tasks', icon: '✅' },
     { label: 'Users & Roles', href: '/admin/users', icon: '⚙️' },
   ];
 

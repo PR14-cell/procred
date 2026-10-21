@@ -76,6 +76,28 @@ export const GET = withErrorHandler(async (req: Request, context?: RouteContext)
     take: 20,
   });
 
+  // Fetch tasks for this provider and their credentials
+  const allCredentialIds = [
+    ...provider.stateLicenses.map((l) => l.id),
+    ...provider.deaRegistrations.map((d) => d.id),
+    ...provider.boardCertifications.map((b) => b.id),
+    ...provider.malpracticePolicies.map((m) => m.id),
+    ...(provider.caqhProfile ? [provider.caqhProfile.id] : []),
+  ];
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      OR: [
+        { entityId: providerId },
+        { entityId: { in: allCredentialIds } },
+      ],
+    },
+    include: {
+      assignedTo: { select: { id: true, firstName: true, lastName: true, email: true } },
+    },
+    orderBy: [{ status: 'asc' }, { dueDate: 'asc' }],
+  });
+
   // Handle SSN masking and decryption
   let ssnDisplay: string | null = null;
   if (provider.ssnEncrypted) {
@@ -116,6 +138,7 @@ export const GET = withErrorHandler(async (req: Request, context?: RouteContext)
   return NextResponse.json({
     provider: safeProvider,
     auditHistory: auditLogs,
+    tasks,
   });
 });
 
