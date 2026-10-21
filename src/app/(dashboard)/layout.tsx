@@ -23,7 +23,7 @@ export default function DashboardLayout({
 
   const navItems = [
     { label: 'Dashboard', href: '/dashboard', icon: '📊' },
-    { label: 'Providers', href: '/providers', icon: '👤', badge: 'Phase 2' },
+    { label: 'Providers', href: '/providers', icon: '👤' },
     { label: 'Enrollments', href: '/enrollments', icon: '📝', badge: 'Phase 3' },
     { label: 'Documents', href: '/documents', icon: '📄', badge: 'Phase 3' },
     { label: 'Tasks', href: '/tasks', icon: '✅', badge: 'Phase 4' },
@@ -78,7 +78,7 @@ export default function DashboardLayout({
               <div className="text-slate-400">Admin Account</div>
             </div>
             <span className="inline-block px-2 py-0.5 text-[10px] font-semibold bg-emerald-900/50 text-emerald-400 border border-emerald-700/50 rounded">
-              Phase 1 Active
+              Phase 2 Active
             </span>
           </div>
           <button

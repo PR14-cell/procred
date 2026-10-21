@@ -40,13 +40,13 @@ export class ApiError extends Error {
   }
 }
 
-export type RouteHandler = (
+export type RouteHandler<T = unknown> = (
   req: Request,
-  context?: { params?: Record<string, string | string[]> }
+  context?: T
 ) => Promise<NextResponse | Response>;
 
-export function withErrorHandler(handler: RouteHandler): RouteHandler {
-  return async (req: Request, context?: { params?: Record<string, string | string[]> }) => {
+export function withErrorHandler<T = unknown>(handler: RouteHandler<T>): RouteHandler<T> {
+  return async (req: Request, context?: T) => {
     try {
       return await handler(req, context);
     } catch (error: unknown) {
