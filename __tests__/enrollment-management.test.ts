@@ -111,6 +111,9 @@ describe('Phase 4: Payer Enrollment Management Module', () => {
 
   afterAll(async () => {
     // Cleanup created test records
+    await prisma.document.deleteMany({
+      where: { entityType: 'payer_enrollment', entityId: { in: createdEnrollmentIds } },
+    });
     await prisma.enrollmentFollowUp.deleteMany({
       where: { enrollmentId: { in: createdEnrollmentIds } },
     });
@@ -660,6 +663,209 @@ describe('Phase 4: Payer Enrollment Management Module', () => {
       expect(typeof res.summaryCounts.overdueFollowUpsCount).toBe('number');
       expect(typeof res.summaryCounts.revalidationRequiredCount).toBe('number');
       expect(res.summaryCounts.totalCount).toBeGreaterThanOrEqual(createdEnrollmentIds.length);
+    });
+  });
+
+  // ==========================================
+  // 10. Aging and Boundary Calculations
+  // ==========================================
+  describe('10. Boundary Tests for Aging and Follow-Up Windows', () => {
+    it('should correctly calculate exact 0, 30, 60, and 90 day aging intervals', () => {
+      const now = new Date();
+      // Exactly today
+      const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      expect(calculateEnrollmentAging(today)).toBe(0);
+
+      // Exactly 30 days ago
+      const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+      expect(calculateEnrollmentAging(thirtyDaysAgo)).toBe(30);
+
+      // Exactly 60 days ago
+      const sixtyDaysAgo = new Date(today.getTime() - 60 * 24 * 60 * 60 * 1000);
+      expect(calculateEnrollmentAging(sixtyDaysAgo)).toBe(60);
+
+      // Exactly 90 days ago
+      const ninetyDaysAgo = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000);
+      expect(calculateEnrollmentAging(ninetyDaysAgo)).toBe(90);
+
+      // Future date clamps to 0
+      const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+      expect(calculateEnrollmentAging(tomorrow)).toBe(0);
+    });
+
+    it('should evaluate follow-up window boundaries (0, 7, and 8 days)', () => {
+      const now = new Date();
+      const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+      // Today
+      const evalToday = evaluateFollowUpStatus(today);
+      expect(evalToday.isUpcoming).toBe(true);
+      expect(evalToday.isOverdue).toBe(false);
+
+      // 7 days ahead (inclusive boundary)
+      const sevenDays = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const eval7 = evaluateFollowUpStatus(sevenDays);
+      expect(eval7.isUpcoming).toBe(true);
+      expect(eval7.isOverdue).toBe(false);
+
+      // 8 days ahead (outside upcoming window)
+      const eightDays = new Date(today.getTime() + 8 * 24 * 60 * 60 * 1000);
+      const eval8 = evaluateFollowUpStatus(eightDays);
+      expect(eval8.isUpcoming).toBe(false);
+      expect(eval8.isOverdue).toBe(false);
+
+      // 1 day past (overdue)
+      const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+      const evalYesterday = evaluateFollowUpStatus(yesterday);
+      expect(evalYesterday.isOverdue).toBe(true);
+      expect(evalYesterday.isUpcoming).toBe(false);
+    });
+  });
+
+  // ==========================================
+  // 11. Document Association with Enrollment
+  // ==========================================
+  describe('11. Polymorphic Document Association with Enrollment', () => {
+    it('should successfully link document metadata to a payer enrollment', async () => {
+      const enrId = createdEnrollmentIds[0];
+      const doc = await prisma.document.create({
+        data: {
+          entityType: 'payer_enrollment',
+          entityId: enrId,
+          documentType: 'payer_contract',
+          title: 'BCBSTX Participation Agreement 2026',
+          uploadedById: testUserId,
+          versions: {
+            create: {
+              versionNumber: 1,
+              fileName: 'bcbstx_agreement_2026.pdf',
+              fileSize: 1048576,
+              mimeType: 'application/pdf',
+              s3Bucket: 'credentialing-documents',
+              s3Key: `payer_enrollments/${enrId}/bcbstx_agreement_2026.pdf`,
+              uploadedById: testUserId,
+            },
+          },
+        },
+        include: {
+          versions: true,
+        },
+      });
+
+      expect(doc.id).toBeDefined();
+      expect(doc.entityType).toBe('payer_enrollment');
+      expect(doc.entityId).toBe(enrId);
+      expect(doc.versions.length).toBe(1);
+      expect(doc.versions[0].fileName).toBe('bcbstx_agreement_2026.pdf');
+
+      const retrievedDocs = await prisma.document.findMany({
+        where: { entityType: 'payer_enrollment', entityId: enrId },
+        include: { versions: true },
+      });
+      expect(retrievedDocs.length).toBeGreaterThanOrEqual(1);
+      expect(retrievedDocs.some((d) => d.id === doc.id)).toBe(true);
+    });
+  });
+
+  // ==========================================
+  // 12. Cross-Provider Data Isolation
+  // ==========================================
+  describe('12. Cross-Provider Data Isolation and Non-Interference', () => {
+    let secondProviderId: string;
+    let secondEnrollmentId: string;
+
+    beforeAll(async () => {
+      // Ensure NPI cleanup
+      await prisma.provider.deleteMany({ where: { npiNumber: '9922334455' } });
+
+      const provider2 = await prisma.provider.create({
+        data: {
+          firstName: 'Elena',
+          lastName: 'Rostova',
+          suffix: 'MD',
+          npiNumber: '9922334455',
+          primaryTaxonomy: '207Q00000X',
+          status: 'active',
+        },
+      });
+      secondProviderId = provider2.id;
+
+      const enr2 = await prisma.payerEnrollment.create({
+        data: {
+          providerId: secondProviderId,
+          payerId: testPayerId,
+          enrollmentType: 'individual',
+          status: 'pending',
+          trackingNumber: 'ROSTOVA-BCBS-1100',
+        },
+      });
+      secondEnrollmentId = enr2.id;
+      createdEnrollmentIds.push(enr2.id);
+    });
+
+    afterAll(async () => {
+      await prisma.payerEnrollment.deleteMany({ where: { id: secondEnrollmentId } });
+      await prisma.provider.deleteMany({ where: { id: secondProviderId } });
+    });
+
+    it('should isolate enrollment queries per provider', async () => {
+      const brodyResults = await getEnrollments({ providerId: testProviderId });
+      expect(brodyResults.items.every((e) => e.providerId === testProviderId)).toBe(true);
+      expect(brodyResults.items.some((e) => e.id === secondEnrollmentId)).toBe(false);
+
+      const rostovaResults = await getEnrollments({ providerId: secondProviderId });
+      expect(rostovaResults.items.length).toBe(1);
+      expect(rostovaResults.items[0].id).toBe(secondEnrollmentId);
+      expect(rostovaResults.items[0].providerId).toBe(secondProviderId);
+    });
+
+    it('should prevent cross-provider mutation from corrupting other enrollments', async () => {
+      // Update Brody's enrollment
+      await prisma.payerEnrollment.update({
+        where: { id: createdEnrollmentIds[0] },
+        data: { trackingNumber: 'BRODY-UPDATED-999' },
+      });
+
+      // Confirm Rostova's enrollment is completely unaffected
+      const rostovaEnr = await prisma.payerEnrollment.findUnique({
+        where: { id: secondEnrollmentId },
+      });
+      expect(rostovaEnr?.trackingNumber).toBe('ROSTOVA-BCBS-1100');
+    });
+  });
+
+  // ==========================================
+  // 13. Audit Log Immutability Non-Regression
+  // ==========================================
+  describe('13. Audit Log Immutability Non-Regression for Enrollments', () => {
+    it('should reject UPDATE operations on audit_logs via PostgreSQL BEFORE trigger or permissions', async () => {
+      const testAudit = await prisma.auditLog.create({
+        data: {
+          action: 'TEST_ENROLLMENT_IMMUTABILITY_AUDIT',
+          entityType: 'payer_enrollment',
+          entityId: createdEnrollmentIds[0],
+          changes: { test: true },
+        },
+      });
+
+      await expect(
+        prisma.$executeRaw`UPDATE audit_logs SET action = 'HACKED' WHERE id = ${testAudit.id}::uuid`
+      ).rejects.toThrow();
+    });
+
+    it('should reject DELETE operations on audit_logs via PostgreSQL BEFORE trigger or permissions', async () => {
+      const testAudit = await prisma.auditLog.create({
+        data: {
+          action: 'TEST_ENROLLMENT_DELETE_AUDIT',
+          entityType: 'payer_enrollment',
+          entityId: createdEnrollmentIds[0],
+          changes: { test: true },
+        },
+      });
+
+      await expect(
+        prisma.$executeRaw`DELETE FROM audit_logs WHERE id = ${testAudit.id}::uuid`
+      ).rejects.toThrow();
     });
   });
 });
