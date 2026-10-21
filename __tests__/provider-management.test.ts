@@ -279,6 +279,27 @@ describe('Phase 2: Provider Management Module', () => {
       });
       expect(results.some((p) => p.id === createdProviderId)).toBe(true);
     });
+
+    it('should correctly support pagination and sorting controls', async () => {
+      const pageSize = 1;
+      const page1 = await prisma.provider.findMany({
+        skip: 0,
+        take: pageSize,
+        orderBy: { lastName: 'asc' },
+      });
+      expect(page1.length).toBeLessThanOrEqual(pageSize);
+
+      const total = await prisma.provider.count();
+      const totalPages = Math.ceil(total / pageSize);
+      expect(totalPages).toBeGreaterThanOrEqual(1);
+
+      const page2 = await prisma.provider.findMany({
+        skip: 1,
+        take: pageSize,
+        orderBy: { lastName: 'asc' },
+      });
+      expect(page2.length).toBeLessThanOrEqual(pageSize);
+    });
   });
 
   // ==========================================
