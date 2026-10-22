@@ -336,6 +336,10 @@ export class TaskService {
   static async updateTask(id: string, data: UpdateTaskInput, actor: TaskActor) {
     const existing = await this.getTaskById(id);
 
+    if (existing.status === 'cancelled' && data.status === 'completed') {
+      throw ApiError.badRequest('Cannot directly complete a cancelled task');
+    }
+
     const isCompleting = data.status === 'completed' && existing.status !== 'completed';
     const isReopening =
       data.status && data.status !== 'completed' && existing.status === 'completed';
@@ -414,6 +418,10 @@ export class TaskService {
   static async completeTask(id: string, completionNotes: string | null | undefined, actor: TaskActor) {
     const existing = await this.getTaskById(id);
 
+    if (existing.status === 'cancelled') {
+      throw ApiError.badRequest('Cannot complete a cancelled task');
+    }
+
     const updated = await prisma.task.update({
       where: { id },
       data: {
@@ -452,6 +460,10 @@ export class TaskService {
    */
   static async assignTask(id: string, assignedToId: string, actor: TaskActor) {
     const existing = await this.getTaskById(id);
+
+    if (existing.status === 'completed' || existing.status === 'cancelled') {
+      throw ApiError.badRequest(`Cannot reassign a ${existing.status} task`);
+    }
 
     // Verify assigned user exists and is active
     const user = await prisma.user.findUnique({

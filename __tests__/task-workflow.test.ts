@@ -226,6 +226,77 @@ describe('Phase 6: Tasks, Notes, Verification & Operational Workflow', () => {
       expect(cancelled.status).toBe('cancelled');
       expect(cancelled.completionNotes).toContain('Provider withdrew');
     });
+
+    it('rejects completing an already cancelled task (invalid transition)', async () => {
+      const taskToCancel = await TaskService.createTask(
+        {
+          title: 'Cancelled Transition Test',
+          taskType: 'general',
+          providerId: testProvider.id,
+        },
+        { id: specialistUser.id, email: specialistUser.email }
+      );
+      createdTaskIds.push(taskToCancel.id);
+
+      await TaskService.cancelTask(taskToCancel.id, 'No longer needed', {
+        id: specialistUser.id,
+        email: specialistUser.email,
+      });
+
+      await expect(
+        TaskService.completeTask(taskToCancel.id, 'Trying to complete cancelled task', {
+          id: specialistUser.id,
+          email: specialistUser.email,
+        })
+      ).rejects.toThrow('Cannot complete a cancelled task');
+    });
+
+    it('rejects reassigning a completed task', async () => {
+      await expect(
+        TaskService.assignTask(taskId, specialistUser.id, {
+          id: colleagueUser.id,
+          email: colleagueUser.email,
+        })
+      ).rejects.toThrow('Cannot reassign a completed task');
+    });
+
+    it('verifies completing a task does NOT alter underlying credential or document status', async () => {
+      // Create a test state license in pending_verification
+      const license = await prisma.stateLicense.create({
+        data: {
+          providerId: testProvider.id,
+          state: 'TX',
+          licenseNumber: 'TX-TASK-TEST-99',
+          status: 'pending_verification',
+        },
+      });
+
+      // Create a task associated with this license
+      const task = await TaskService.createTask(
+        {
+          title: 'Verify TX State License',
+          taskType: 'verification',
+          entityType: 'state_license',
+          entityId: license.id,
+          providerId: testProvider.id,
+        },
+        { id: specialistUser.id, email: specialistUser.email }
+      );
+      createdTaskIds.push(task.id);
+
+      // Complete the task
+      await TaskService.completeTask(task.id, 'Verified via primary source website', {
+        id: specialistUser.id,
+        email: specialistUser.email,
+      });
+
+      // Check license status in DB: MUST STILL BE pending_verification because formal PSV was not performed
+      const checkLicense = await prisma.stateLicense.findUnique({ where: { id: license.id } });
+      expect(checkLicense?.status).toBe('pending_verification');
+
+      // Cleanup
+      await prisma.stateLicense.delete({ where: { id: license.id } });
+    });
   });
 
   describe('3. Task Work Queue Filtering & KPI Metrics', () => {
@@ -494,6 +565,26 @@ describe('Phase 6: Tasks, Notes, Verification & Operational Workflow', () => {
         where: { entityId: toDelete.id, action: 'NOTE_DELETED' },
       });
       expect(audit).toBeDefined();
+    });
+
+    it('rejects note creation with non-existent provider ID (IDOR boundary)', async () => {
+      await expect(
+        NoteService.createNote(
+          {
+            entityType: 'provider',
+            entityId: '00000000-0000-0000-0000-000000009999',
+            providerId: '00000000-0000-0000-0000-000000009999',
+            content: 'Attempting to inject note into non-existent provider',
+          },
+          { id: specialistUser.id, email: specialistUser.email }
+        )
+      ).rejects.toThrow('Provider not found');
+    });
+
+    it('rejects note retrieval with non-existent provider ID (IDOR boundary)', async () => {
+      await expect(
+        NoteService.getNotes({ providerId: '00000000-0000-0000-0000-000000009999' })
+      ).rejects.toThrow('Provider not found');
     });
   });
 

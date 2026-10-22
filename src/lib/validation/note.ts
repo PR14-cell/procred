@@ -8,7 +8,7 @@ export const createNoteSchema = z.object({
   isPinned: z.boolean().optional().default(false),
 });
 
-export type CreateNoteInput = z.infer<typeof createNoteSchema>;
+export type CreateNoteInput = z.input<typeof createNoteSchema>;
 
 export const updateNoteSchema = z.object({
   content: z.string().min(1, 'Note content cannot be empty').max(10000).optional(),

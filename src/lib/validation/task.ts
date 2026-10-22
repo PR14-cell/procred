@@ -40,7 +40,7 @@ export const createTaskSchema = z.object({
   entityId: z.string().uuid('Invalid entity ID').optional().nullable(),
 });
 
-export type CreateTaskInput = z.infer<typeof createTaskSchema>;
+export type CreateTaskInput = z.input<typeof createTaskSchema>;
 
 // 2. Update Task Details Schema
 export const updateTaskSchema = z.object({

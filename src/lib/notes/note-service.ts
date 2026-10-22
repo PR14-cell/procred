@@ -23,6 +23,13 @@ export class NoteService {
       where.entityType = params.entityType;
       where.entityId = params.entityId;
     } else if (params.providerId) {
+      const provider = await prisma.provider.findUnique({
+        where: { id: params.providerId },
+      });
+      if (!provider) {
+        throw ApiError.notFound('Provider not found');
+      }
+
       where.OR = [
         { providerId: params.providerId },
         { entityType: 'provider', entityId: params.providerId },
@@ -71,6 +78,15 @@ export class NoteService {
 
     if (!providerId && data.entityType === 'provider') {
       providerId = data.entityId;
+    }
+
+    if (providerId) {
+      const provider = await prisma.provider.findUnique({
+        where: { id: providerId },
+      });
+      if (!provider) {
+        throw ApiError.notFound('Provider not found');
+      }
     }
 
     const note = await prisma.note.create({
