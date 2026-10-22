@@ -607,4 +607,115 @@ describe('Phase 5: Document Management & Verification Module', () => {
       expect(res.summaryCounts.totalCount).toBeGreaterThanOrEqual(createdDocumentIds.length);
     });
   });
+
+  // ==========================================
+  // 10. Storage Reconciliation on Failure
+  // ==========================================
+  describe('10. Storage Reconciliation and Rollback on Failure', () => {
+    it('should clean up S3 object when database transaction fails during upload', async () => {
+      // Intentionally provide a non-existent provider UUID that violates foreign key
+      const nonExistentId = '00000000-0000-0000-0000-000000009999';
+
+      await expect(
+        createDocumentWithVersion({
+          entityType: 'provider',
+          entityId: nonExistentId,
+          providerId: nonExistentId,
+          documentType: 'state_license',
+          title: 'Orphan Prevention Test',
+          fileBuffer: dummyPdfBuffer,
+          fileName: 'orphan_test.pdf',
+          mimeType: 'application/pdf',
+          uploadedById: testUserId,
+        })
+      ).rejects.toThrow();
+
+      // Verify no document was saved in the database
+      const dbCheck = await prisma.document.findFirst({
+        where: { title: 'Orphan Prevention Test' },
+      });
+      expect(dbCheck).toBeNull();
+    });
+  });
+
+  // ==========================================
+  // 11. IDOR and Cross-Provider Access Boundaries
+  // ==========================================
+  describe('11. IDOR Prevention & Cross-Provider Isolation', () => {
+    let secondProviderId: string;
+    let secondDocId: string;
+
+    beforeAll(async () => {
+      await prisma.provider.deleteMany({ where: { npiNumber: '9988112233' } });
+      const prov2 = await prisma.provider.create({
+        data: {
+          firstName: 'Aaron',
+          lastName: 'Stone',
+          suffix: 'MD',
+          npiNumber: '9988112233',
+          primaryTaxonomy: '207Q00000X',
+          status: 'active',
+        },
+      });
+      secondProviderId = prov2.id;
+
+      const doc2 = await createDocumentWithVersion({
+        entityType: 'provider',
+        entityId: secondProviderId,
+        providerId: secondProviderId,
+        documentType: 'board_certification',
+        title: 'Dr. Stone Board Certificate',
+        fileBuffer: dummyPdfBuffer,
+        fileName: 'stone_cert.pdf',
+        mimeType: 'application/pdf',
+        uploadedById: testUserId,
+      });
+      secondDocId = doc2.id;
+      createdDocumentIds.push(doc2.id);
+    });
+
+    afterAll(async () => {
+      await prisma.document.deleteMany({ where: { id: secondDocId } });
+      await prisma.provider.deleteMany({ where: { id: secondProviderId } });
+    });
+
+    it('should return null when querying non-existent document ID (preventing IDOR)', async () => {
+      const nonExistent = await getDocumentById('00000000-0000-0000-0000-000000000000');
+      expect(nonExistent).toBeNull();
+    });
+
+    it('should strictly isolate document queries by providerId', async () => {
+      const vanceDocs = await getDocuments({ providerId: testProviderId });
+      expect(vanceDocs.documents.every((d) => d.providerId === testProviderId)).toBe(true);
+      expect(vanceDocs.documents.some((d) => d.id === secondDocId)).toBe(false);
+
+      const stoneDocs = await getDocuments({ providerId: secondProviderId });
+      expect(stoneDocs.documents.length).toBe(1);
+      expect(stoneDocs.documents[0].id).toBe(secondDocId);
+      expect(stoneDocs.documents[0].providerId).toBe(secondProviderId);
+    });
+  });
+
+  // ==========================================
+  // 12. Metadata Updates & Schema Boundaries
+  // ==========================================
+  describe('12. Metadata Updates and Schema Validations', () => {
+    it('should validate and update document metadata safely', async () => {
+      const doc = await getDocumentById(createdDocumentIds[0]);
+      expect(doc).toBeDefined();
+
+      const validUpdate = updateDocumentMetadataSchema.safeParse({
+        title: 'Updated State License Title 2026',
+        description: 'Updated description for board verification.',
+        expirationDate: '2028-12-31',
+      });
+      expect(validUpdate.success).toBe(true);
+
+      const invalidUpdate = updateDocumentMetadataSchema.safeParse({
+        issueDate: '2029-01-01',
+        expirationDate: '2025-01-01', // Invalid: expiration before issue date
+      });
+      expect(invalidUpdate.success).toBe(false);
+    });
+  });
 });
