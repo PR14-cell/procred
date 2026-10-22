@@ -599,7 +599,9 @@ export default function ExecutiveDashboardPage() {
           </div>
 
           {workload.length === 0 ? (
-            <div className="p-8 text-center text-slate-400 text-xs">No active staff users configured.</div>
+            <div className="p-8 text-center text-slate-400 text-xs">
+              Staff workload metrics are restricted to administrators and specialists, or no active tasks are currently assigned.
+            </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-600">

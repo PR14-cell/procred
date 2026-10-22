@@ -3,6 +3,9 @@ import { prisma } from '../src/lib/db/prisma';
 import { ReportService } from '../src/lib/reports/report-service';
 import { createDocumentWithVersion } from '../src/lib/documents/document-service';
 import { hasPermission } from '../src/lib/auth/rbac';
+import { createSessionToken } from '../src/lib/auth/jwt';
+import { GET as getWorkloadRoute } from '../src/app/api/v1/reports/workload/route';
+import { GET as getExportRoute } from '../src/app/api/v1/reports/export/route';
 import { UserRole } from '@prisma/client';
 
 describe('Phase 7: Reporting, Analytics & Dashboards Module', () => {
@@ -379,6 +382,60 @@ describe('Phase 7: Reporting, Analytics & Dashboards Module', () => {
       expect(hasPermission(UserRole.enrollment_specialist, 'reports:export')).toBe(true);
       // Viewer CANNOT export bulk data dumps
       expect(hasPermission(UserRole.viewer, 'reports:export')).toBe(false);
+    });
+
+    it('rejects viewer from accessing workload endpoint via direct HTTP request (403 Forbidden)', async () => {
+      const viewerToken = await createSessionToken({
+        userId: viewerUser.id,
+        email: viewerUser.email,
+        role: UserRole.viewer,
+        sessionId: 'sess-viewer-01',
+      });
+
+      const req = new Request('http://localhost/api/v1/reports/workload', {
+        headers: { cookie: `session_token=${viewerToken}` },
+      });
+
+      const res = await getWorkloadRoute(req);
+      expect(res.status).toBe(403);
+      const data = await res.json();
+      expect(data.error).toBe('FORBIDDEN');
+    });
+
+    it('rejects viewer from exporting CSV via direct HTTP request (403 Forbidden)', async () => {
+      const viewerToken = await createSessionToken({
+        userId: viewerUser.id,
+        email: viewerUser.email,
+        role: UserRole.viewer,
+        sessionId: 'sess-viewer-02',
+      });
+
+      const req = new Request('http://localhost/api/v1/reports/export?type=credentials', {
+        headers: { cookie: `session_token=${viewerToken}` },
+      });
+
+      const res = await getExportRoute(req);
+      expect(res.status).toBe(403);
+    });
+
+    it('allows admin to export CSV via direct HTTP request (200 OK)', async () => {
+      const adminToken = await createSessionToken({
+        userId: adminUser.id,
+        email: adminUser.email,
+        role: UserRole.admin,
+        sessionId: 'sess-admin-01',
+      });
+
+      const req = new Request('http://localhost/api/v1/reports/export?type=credentials', {
+        headers: { cookie: `session_token=${adminToken}` },
+      });
+
+      const res = await getExportRoute(req);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/csv');
+      const csvText = await res.text();
+      expect(csvText).toContain('Type');
+      expect(csvText).toContain('FL-RPT-777');
     });
   });
 });
