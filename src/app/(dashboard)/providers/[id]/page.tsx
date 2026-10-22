@@ -190,7 +190,9 @@ export default function ProviderProfilePage() {
   const [provider, setProvider] = useState<ProviderProfile | null>(null);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [auditHistory, setAuditHistory] = useState<AuditItem[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'specialties' | 'locations' | 'credentials' | 'enrollments' | 'audit'>('overview');
+  const [providerDocs, setProviderDocs] = useState<any[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [activeTab, setActiveTab] = useState<'overview' | 'specialties' | 'locations' | 'credentials' | 'enrollments' | 'documents' | 'audit'>('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -248,6 +250,11 @@ export default function ProviderProfilePage() {
       setProvider(data.provider);
       setTasks(data.tasks || []);
       setAuditHistory(data.auditHistory || []);
+      // Also fetch documents for this provider
+      fetch(`/api/v1/documents?providerId=${providerId}`)
+        .then((r) => r.json())
+        .then((d) => setProviderDocs(d.documents || []))
+        .catch(() => {});
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error loading provider');
     } finally {
@@ -719,6 +726,26 @@ export default function ProviderProfilePage() {
           <span>Payer Enrollments</span>
           <span className="px-1.5 py-0.2 rounded-full text-[11px] bg-slate-100 text-slate-600">
             {provider.enrollments.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('documents');
+            fetch(`/api/v1/documents?providerId=${providerId}`)
+              .then((r) => r.json())
+              .then((d) => setProviderDocs(d.documents || []))
+              .catch(() => {});
+          }}
+          className={`pb-3 transition flex items-center space-x-1.5 ${
+            activeTab === 'documents'
+              ? 'text-blue-600 font-bold border-b-2 border-blue-600'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <span>Documents</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[11px] bg-slate-100 text-slate-600">
+            {providerDocs.length}
           </span>
         </button>
 
@@ -1462,7 +1489,104 @@ export default function ProviderProfilePage() {
         </div>
       )}
 
-      {/* Tab 6: Audit History */}
+      {/* Tab 6: Documents & Verification */}
+      {activeTab === 'documents' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Provider Documents Repository</h2>
+              <p className="text-xs text-slate-500">
+                Primary source documents, licenses, certifications, contracts, and version records
+              </p>
+            </div>
+            <Link
+              href="/documents"
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition"
+            >
+              + Upload in Document Center
+            </Link>
+          </div>
+
+          {providerDocs.length === 0 ? (
+            <div className="py-12 text-center">
+              <div className="text-3xl mb-2">📄</div>
+              <div className="text-xs font-semibold text-slate-700">No documents uploaded for this provider yet</div>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                Upload credential certificates, malpractice policies, or signed agreements in the Document Center.
+              </p>
+              <Link
+                href="/documents"
+                className="mt-3 inline-block px-3 py-1.5 text-xs font-medium text-blue-600 hover:underline"
+              >
+                Go to Document Center →
+              </Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {providerDocs.map((doc: any) => (
+                <div
+                  key={doc.id}
+                  className="p-4 rounded-xl border border-slate-200 hover:border-blue-300 transition bg-white flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-semibold text-sm text-slate-900">{doc.title}</div>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                          doc.status === 'verified'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : doc.status === 'rejected'
+                            ? 'bg-rose-100 text-rose-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {doc.status.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-slate-500 mt-1 flex items-center space-x-2">
+                      <span className="capitalize">{doc.documentType.replace(/_/g, ' ')}</span>
+                      {doc.currentVersion && (
+                        <>
+                          <span>•</span>
+                          <span className="font-bold text-blue-700">v{doc.currentVersion.versionNumber}</span>
+                        </>
+                      )}
+                    </div>
+
+                    {doc.expirationDate && (
+                      <div className="text-xs text-slate-600 mt-2">
+                        Expires: <span className="font-medium">{new Date(doc.expirationDate).toLocaleDateString()}</span>
+                      </div>
+                    )}
+
+                    {doc.rejectionReason && (
+                      <div className="mt-2 text-xs text-rose-700 bg-rose-50 p-2 rounded border border-rose-200">
+                        <strong>Rejection Reason:</strong> {doc.rejectionReason}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                    <span className="text-slate-400 text-[11px]">
+                      {doc.currentVersion?.fileName || 'file'}
+                    </span>
+                    <a
+                      href={`/api/v1/documents/${doc.id}/download`}
+                      download
+                      className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded transition"
+                    >
+                      Download
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 7: Audit History */}
       {activeTab === 'audit' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
           <div className="border-b border-slate-100 pb-3">

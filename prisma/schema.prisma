@@ -48,6 +48,7 @@ model User {
   verifiedDea                DeaRegistration[]       @relation("VerifiedDea")
   verifiedBoards             BoardCertification[]    @relation("VerifiedBoards")
   verifiedMalpractice        MalpracticeInsurance[]  @relation("VerifiedMalpractice")
+  verifiedDocuments          Document[]              @relation("VerifiedDocuments")
 
   @@map("users")
 }
@@ -98,6 +99,7 @@ model Provider {
   caqhProfile          CaqhProfile?
   enrollments          PayerEnrollment[]
   verificationHistory  VerificationHistory[]
+  documents            Document[]              @relation("ProviderDocuments")
 
   @@map("providers")
 }
@@ -360,23 +362,35 @@ model EnrollmentFollowUp {
 }
 
 model Document {
-  id               String    @id @default(uuid()) @db.Uuid
-  entityType       String    @map("entity_type") @db.VarChar(50)
-  entityId         String    @map("entity_id") @db.Uuid
-  documentType     String    @map("document_type") @db.VarChar(100)
-  title            String    @db.VarChar(255)
-  description      String?
-  currentVersionId String?   @unique @map("current_version_id") @db.Uuid
-  expirationDate   DateTime? @map("expiration_date") @db.Date
-  uploadedById     String?   @map("uploaded_by") @db.Uuid
-  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  id                String    @id @default(uuid()) @db.Uuid
+  entityType        String    @map("entity_type") @db.VarChar(50)
+  entityId          String    @map("entity_id") @db.Uuid
+  providerId        String?   @map("provider_id") @db.Uuid
+  documentType      String    @map("document_type") @db.VarChar(100)
+  title             String    @db.VarChar(255)
+  description       String?
+  status            String    @default("pending_review") @db.VarChar(30)
+  currentVersionId  String?   @unique @map("current_version_id") @db.Uuid
+  issueDate         DateTime? @map("issue_date") @db.Date
+  expirationDate    DateTime? @map("expiration_date") @db.Date
+  uploadedById      String?   @map("uploaded_by") @db.Uuid
+  verifiedById      String?   @map("verified_by") @db.Uuid
+  verifiedAt        DateTime? @map("verified_at") @db.Timestamptz()
+  verificationNotes String?   @map("verification_notes")
+  rejectionReason   String?   @map("rejection_reason")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
 
-  uploadedBy       User?     @relation("UploadedDocuments", fields: [uploadedById], references: [id])
-  versions         DocumentVersion[] @relation("DocumentVersions")
-  currentVersion   DocumentVersion?  @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  provider          Provider? @relation("ProviderDocuments", fields: [providerId], references: [id], onDelete: Cascade)
+  uploadedBy        User?     @relation("UploadedDocuments", fields: [uploadedById], references: [id])
+  verifiedBy        User?     @relation("VerifiedDocuments", fields: [verifiedById], references: [id])
+  versions          DocumentVersion[] @relation("DocumentVersions")
+  currentVersion    DocumentVersion?  @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
 
   @@index([entityType, entityId])
+  @@index([providerId])
+  @@index([documentType])
+  @@index([status])
   @@index([expirationDate])
   @@map("documents")
 }

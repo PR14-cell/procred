@@ -19,6 +19,7 @@ export const GET = withErrorHandler(async () => {
     expiringCaqh,
     enrollmentsList,
     overdueTasks,
+    documentsList,
   ] = await Promise.all([
     // 1. Total active users in the system
     prisma.user.count({ where: { isActive: true } }),
@@ -100,6 +101,14 @@ export const GET = withErrorHandler(async () => {
         },
       },
     }),
+
+    // 10. Document metrics
+    prisma.document.findMany({
+      select: {
+        status: true,
+        expirationDate: true,
+      },
+    }),
   ]);
 
   const totalExpiringCredentials =
@@ -144,6 +153,19 @@ export const GET = withErrorHandler(async () => {
     return diffDays > 30;
   }).length;
 
+  // Document metrics calculations
+  const totalDocuments = documentsList.length;
+  const pendingReviewDocuments = documentsList.filter(
+    (d) => d.status === 'pending_review' || d.status === 'uploaded'
+  ).length;
+  const verifiedDocuments = documentsList.filter((d) => d.status === 'verified').length;
+  const rejectedDocuments = documentsList.filter((d) => d.status === 'rejected').length;
+  const expiringDocuments = documentsList.filter((d) => {
+    if (!d.expirationDate) return false;
+    const exp = new Date(d.expirationDate);
+    return exp >= todayDateOnly && exp <= new Date(todayDateOnly.getTime() + 30 * 24 * 60 * 60 * 1000);
+  }).length;
+
   return NextResponse.json({
     stats: {
       totalUsers,
@@ -155,6 +177,13 @@ export const GET = withErrorHandler(async () => {
         boardCertifications: expiringBoards,
         malpractice: expiringMalpractice,
         caqh: expiringCaqh,
+      },
+      documents: {
+        total: totalDocuments,
+        pendingReview: pendingReviewDocuments,
+        verified: verifiedDocuments,
+        rejected: rejectedDocuments,
+        expiringSoon: expiringDocuments,
       },
       enrollments: {
         total: totalEnrollments,

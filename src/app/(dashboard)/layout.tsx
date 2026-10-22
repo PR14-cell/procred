@@ -21,13 +21,20 @@ export default function DashboardLayout({
     router.push('/login');
   };
 
-  const navItems = [
+  interface NavItem {
+    label: string;
+    href: string;
+    icon: string;
+    badge?: string;
+  }
+
+  const navItems: NavItem[] = [
     { label: 'Dashboard', href: '/dashboard', icon: '📊' },
     { label: 'Providers', href: '/providers', icon: '👤' },
     { label: 'Credentials & Expirations', href: '/credentials', icon: '🛡️' },
     { label: 'Payer Enrollments', href: '/enrollments', icon: '📝' },
     { label: 'Payers Directory', href: '/admin/payers', icon: '🏛️' },
-    { label: 'Documents', href: '/documents', icon: '📄', badge: 'Phase 5' },
+    { label: 'Documents', href: '/documents', icon: '📄' },
     { label: 'Tasks', href: '/tasks', icon: '✅' },
     { label: 'Users & Roles', href: '/admin/users', icon: '⚙️' },
   ];
