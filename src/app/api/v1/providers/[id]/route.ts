@@ -89,12 +89,14 @@ export const GET = withErrorHandler(async (req: Request, context?: RouteContext)
   const tasks = await prisma.task.findMany({
     where: {
       OR: [
+        { providerId },
         { entityId: providerId },
         { entityId: { in: allCredentialIds } },
       ],
     },
     include: {
       assignedTo: { select: { id: true, firstName: true, lastName: true, email: true } },
+      completedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
     },
     orderBy: [{ status: 'asc' }, { dueDate: 'asc' }],
   });

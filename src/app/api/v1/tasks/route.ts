@@ -1,75 +1,47 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db/prisma';
-import { withErrorHandler, ApiError } from '@/lib/errors/api-error';
+import { withErrorHandler } from '@/lib/errors/api-error';
 import { requireAuth } from '@/lib/auth/server-auth';
-import { logAuditEvent } from '@/lib/audit/audit-logger';
-import { createCredentialTaskSchema } from '@/lib/validation/credential';
+import { TaskService, TaskFilterOptions } from '@/lib/tasks/task-service';
+import { createTaskSchema } from '@/lib/validation/task';
 
 export const dynamic = 'force-dynamic';
 
-// GET /api/v1/tasks - List tasks
+// GET /api/v1/tasks - List tasks with pagination, filters, and KPI summary
 export const GET = withErrorHandler(async (req: Request) => {
   await requireAuth(req, 'tasks:read');
 
   const { searchParams } = new URL(req.url);
-  const entityType = searchParams.get('entityType') || undefined;
-  const entityId = searchParams.get('entityId') || undefined;
-  const status = searchParams.get('status') || undefined;
-  const assignedToId = searchParams.get('assignedToId') || undefined;
+  const options: TaskFilterOptions = {
+    page: searchParams.get('page') ? parseInt(searchParams.get('page')!, 10) : undefined,
+    pageSize: searchParams.get('pageSize') ? parseInt(searchParams.get('pageSize')!, 10) : undefined,
+    status: searchParams.get('status') || undefined,
+    priority: searchParams.get('priority') || undefined,
+    taskType: searchParams.get('taskType') || undefined,
+    assignedToId: searchParams.get('assignedToId') || undefined,
+    providerId: searchParams.get('providerId') || undefined,
+    entityType: searchParams.get('entityType') || undefined,
+    entityId: searchParams.get('entityId') || undefined,
+    search: searchParams.get('search') || undefined,
+    dueWindow: (searchParams.get('dueWindow') as any) || undefined,
+    sortBy: (searchParams.get('sortBy') as any) || undefined,
+    sortOrder: (searchParams.get('sortOrder') as any) || undefined,
+  };
 
-  const tasks = await prisma.task.findMany({
-    where: {
-      entityType: entityType || undefined,
-      entityId: entityId || undefined,
-      status: status || undefined,
-      assignedToId: assignedToId || undefined,
-    },
-    include: {
-      assignedTo: { select: { id: true, firstName: true, lastName: true, email: true } },
-      createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
-    },
-    orderBy: [{ status: 'asc' }, { dueDate: 'asc' }],
-  });
+  const result = await TaskService.getTasks(options);
 
-  return NextResponse.json({ tasks });
+  return NextResponse.json(result);
 });
 
-// POST /api/v1/tasks - Create a task
+// POST /api/v1/tasks - Create an operational task
 export const POST = withErrorHandler(async (req: Request) => {
   const session = await requireAuth(req, 'tasks:write');
   const body = await req.json();
 
-  const validated = createCredentialTaskSchema.parse(body);
+  const validated = createTaskSchema.parse(body);
 
-  const task = await prisma.task.create({
-    data: {
-      title: validated.title,
-      description: validated.description,
-      entityType: validated.entityType,
-      entityId: validated.entityId,
-      priority: validated.priority,
-      status: 'pending',
-      dueDate: validated.dueDate ? new Date(validated.dueDate) : null,
-      assignedToId: validated.assignedToId || session.userId,
-      createdById: session.userId,
-    },
-    include: {
-      assignedTo: { select: { id: true, firstName: true, lastName: true } },
-    },
-  });
-
-  await logAuditEvent({
-    userId: session.userId,
-    userEmail: session.email,
-    action: 'TASK_CREATED',
-    entityType: 'task',
-    entityId: task.id,
-    changes: {
-      title: task.title,
-      entityType: task.entityType,
-      entityId: task.entityId,
-      priority: task.priority,
-    },
+  const task = await TaskService.createTask(validated, {
+    id: session.userId,
+    email: session.email,
   });
 
   return NextResponse.json(

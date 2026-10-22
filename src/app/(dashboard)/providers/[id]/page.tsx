@@ -97,10 +97,26 @@ interface TaskItem {
   id: string;
   title: string;
   description: string | null;
+  taskType?: string;
   priority: string;
   status: string;
   dueDate: string | null;
+  completedAt?: string | null;
+  completionNotes?: string | null;
   assignedTo: { id: string; firstName: string; lastName: string; email: string } | null;
+}
+
+interface NoteItem {
+  id: string;
+  entityType: string;
+  entityId: string;
+  providerId: string | null;
+  content: string;
+  isPinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: { id: string; firstName: string; lastName: string; email: string } | null;
+  updatedBy: { id: string; firstName: string; lastName: string; email: string } | null;
 }
 
 interface AuditItem {
@@ -192,7 +208,11 @@ export default function ProviderProfilePage() {
   const [auditHistory, setAuditHistory] = useState<AuditItem[]>([]);
   const [providerDocs, setProviderDocs] = useState<any[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'specialties' | 'locations' | 'credentials' | 'enrollments' | 'documents' | 'audit'>('overview');
+  const [providerNotes, setProviderNotes] = useState<NoteItem[]>([]);
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [newNotePinned, setNewNotePinned] = useState(false);
+  const [submittingNote, setSubmittingNote] = useState(false);
+  const [activeTab, setActiveTab] = useState<'overview' | 'specialties' | 'locations' | 'credentials' | 'enrollments' | 'documents' | 'tasks' | 'notes' | 'audit'>('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -250,10 +270,14 @@ export default function ProviderProfilePage() {
       setProvider(data.provider);
       setTasks(data.tasks || []);
       setAuditHistory(data.auditHistory || []);
-      // Also fetch documents for this provider
+      // Also fetch documents and notes for this provider
       fetch(`/api/v1/documents?providerId=${providerId}`)
         .then((r) => r.json())
         .then((d) => setProviderDocs(d.documents || []))
+        .catch(() => {});
+      fetch(`/api/v1/notes?providerId=${providerId}`)
+        .then((r) => r.json())
+        .then((d) => setProviderNotes(d.notes || []))
         .catch(() => {});
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error loading provider');
@@ -301,6 +325,77 @@ export default function ProviderProfilePage() {
       alert(err instanceof Error ? err.message : 'Could not reveal SSN');
     } finally {
       setRevealingSsn(false);
+    }
+  };
+
+  const handleAddNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newNoteContent.trim() || !providerId) return;
+    setSubmittingNote(true);
+    try {
+      const res = await fetch('/api/v1/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entityType: 'provider',
+          entityId: providerId,
+          providerId,
+          content: newNoteContent.trim(),
+          isPinned: newNotePinned,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to create note');
+      setNewNoteContent('');
+      setNewNotePinned(false);
+      const updated = await fetch(`/api/v1/notes?providerId=${providerId}`).then((r) => r.json());
+      setProviderNotes(updated.notes || []);
+    } catch (err: any) {
+      alert(err.message || 'Error creating note');
+    } finally {
+      setSubmittingNote(false);
+    }
+  };
+
+  const handleTogglePinNote = async (noteId: string, currentPinned: boolean) => {
+    try {
+      const res = await fetch(`/api/v1/notes/${noteId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPinned: !currentPinned }),
+      });
+      if (!res.ok) throw new Error('Failed to update note pin');
+      const updated = await fetch(`/api/v1/notes?providerId=${providerId}`).then((r) => r.json());
+      setProviderNotes(updated.notes || []);
+    } catch (err: any) {
+      alert(err.message || 'Error updating note');
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    if (!confirm('Are you sure you want to delete this note?')) return;
+    try {
+      const res = await fetch(`/api/v1/notes/${noteId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete note');
+      const updated = await fetch(`/api/v1/notes?providerId=${providerId}`).then((r) => r.json());
+      setProviderNotes(updated.notes || []);
+    } catch (err: any) {
+      alert(err.message || 'Error deleting note');
+    }
+  };
+
+  const handleCompleteProviderTask = async (taskId: string) => {
+    try {
+      const res = await fetch(`/api/v1/tasks/${taskId}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completionNotes: 'Completed from Provider Profile' }),
+      });
+      if (!res.ok) throw new Error('Failed to complete task');
+      fetchProvider();
+    } catch (err: any) {
+      alert(err.message || 'Error completing task');
     }
   };
 
@@ -746,6 +841,40 @@ export default function ProviderProfilePage() {
           <span>Documents</span>
           <span className="px-1.5 py-0.2 rounded-full text-[11px] bg-slate-100 text-slate-600">
             {providerDocs.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('tasks')}
+          className={`pb-3 transition flex items-center space-x-1.5 ${
+            activeTab === 'tasks'
+              ? 'text-blue-600 font-bold border-b-2 border-blue-600'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <span>Tasks</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[11px] bg-slate-100 text-slate-600">
+            {tasks.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('notes');
+            fetch(`/api/v1/notes?providerId=${providerId}`)
+              .then((r) => r.json())
+              .then((d) => setProviderNotes(d.notes || []))
+              .catch(() => {});
+          }}
+          className={`pb-3 transition flex items-center space-x-1.5 ${
+            activeTab === 'notes'
+              ? 'text-blue-600 font-bold border-b-2 border-blue-600'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <span>Notes</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[11px] bg-slate-100 text-slate-600">
+            {providerNotes.length}
           </span>
         </button>
 
@@ -1578,6 +1707,207 @@ export default function ProviderProfilePage() {
                     >
                       Download
                     </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Tasks */}
+      {activeTab === 'tasks' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Provider Operational Tasks</h2>
+              <p className="text-xs text-slate-500">
+                Actionable tasks, verifications, and reminders associated with this provider
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/tasks"
+                className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 transition"
+              >
+                Open Full Work Queue →
+              </Link>
+            </div>
+          </div>
+
+          {tasks.length === 0 ? (
+            <div className="py-8 text-center text-slate-400 text-xs">
+              <div className="text-2xl mb-1">✅</div>
+              No operational tasks logged for this provider.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-600">
+                <thead className="bg-slate-50 border-b border-slate-200 uppercase font-semibold text-slate-500">
+                  <tr>
+                    <th className="py-2.5 px-3">Task</th>
+                    <th className="py-2.5 px-3">Priority</th>
+                    <th className="py-2.5 px-3">Status</th>
+                    <th className="py-2.5 px-3">Due Date</th>
+                    <th className="py-2.5 px-3">Assigned To</th>
+                    <th className="py-2.5 px-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {tasks.map((task) => (
+                    <tr key={task.id} className="hover:bg-slate-50/60">
+                      <td className="py-2.5 px-3 font-medium text-slate-900">
+                        {task.title}
+                        {task.description && (
+                          <div className="text-slate-400 text-[11px] font-normal">{task.description}</div>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            task.priority === 'urgent'
+                              ? 'bg-rose-100 text-rose-800'
+                              : task.priority === 'high'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {task.priority}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-medium capitalize ${
+                            task.status === 'completed'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : task.status === 'in_progress'
+                              ? 'bg-sky-100 text-sky-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {task.status.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        {task.dueDate ? new Date(task.dueDate).toISOString().slice(0, 10) : '—'}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        {task.assignedTo ? `${task.assignedTo.firstName} ${task.assignedTo.lastName}` : 'Unassigned'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        {task.status !== 'completed' ? (
+                          <button
+                            onClick={() => handleCompleteProviderTask(task.id)}
+                            className="px-2 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded border border-emerald-200 text-[11px] font-medium transition"
+                          >
+                            ✓ Complete
+                          </button>
+                        ) : (
+                          <span className="text-emerald-600 font-medium text-[11px]">Completed</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Notes */}
+      {activeTab === 'notes' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
+          <div className="border-b border-slate-100 pb-3">
+            <h2 className="text-sm font-bold text-slate-900">Provider Operational Notes</h2>
+            <p className="text-xs text-slate-500">
+              Collaborative notes, call logs, and context preserved across the credentialing lifecycle
+            </p>
+          </div>
+
+          {/* New Note Form */}
+          <form onSubmit={handleAddNote} className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+            <label className="block text-xs font-semibold text-slate-700">Add Operational Note</label>
+            <textarea
+              required
+              rows={3}
+              value={newNoteContent}
+              onChange={(e) => setNewNoteContent(e.target.value)}
+              placeholder="Record a follow-up call, provider update, or verification detail..."
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <div className="flex items-center justify-between">
+              <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newNotePinned}
+                  onChange={(e) => setNewNotePinned(e.target.checked)}
+                  className="rounded text-blue-600"
+                />
+                <span>📌 Pin this note to the top</span>
+              </label>
+              <button
+                type="submit"
+                disabled={submittingNote || !newNoteContent.trim()}
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium disabled:opacity-50 transition"
+              >
+                {submittingNote ? 'Saving...' : 'Post Note'}
+              </button>
+            </div>
+          </form>
+
+          {/* Notes List */}
+          {providerNotes.length === 0 ? (
+            <div className="py-8 text-center text-slate-400 text-xs">
+              <div className="text-2xl mb-1">📝</div>
+              No operational notes recorded yet.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {providerNotes.map((note) => (
+                <div
+                  key={note.id}
+                  className={`p-4 rounded-xl border transition ${
+                    note.isPinned
+                      ? 'bg-amber-50/40 border-amber-300 shadow-sm'
+                      : 'bg-white border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      {note.isPinned && (
+                        <span className="text-xs bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-200">
+                          📌 Pinned
+                        </span>
+                      )}
+                      <span className="text-xs font-bold text-slate-800">
+                        {note.createdBy
+                          ? `${note.createdBy.firstName} ${note.createdBy.lastName}`
+                          : 'Staff Member'}
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        {new Date(note.createdAt).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleTogglePinNote(note.id, note.isPinned)}
+                        className="text-xs text-slate-500 hover:text-slate-800"
+                        title={note.isPinned ? 'Unpin' : 'Pin to top'}
+                      >
+                        {note.isPinned ? 'Unpin' : '📌 Pin'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteNote(note.id)}
+                        className="text-xs text-rose-500 hover:text-rose-700"
+                        title="Delete note"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
+                    {note.content}
                   </div>
                 </div>
               ))}

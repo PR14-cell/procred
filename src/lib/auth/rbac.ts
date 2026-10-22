@@ -15,6 +15,8 @@ export type Permission =
   | 'documents:write'
   | 'tasks:read'
   | 'tasks:write'
+  | 'notes:read'
+  | 'notes:write'
   | 'audit:read'
   | 'reports:read';
 
@@ -34,6 +36,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'documents:write',
     'tasks:read',
     'tasks:write',
+    'notes:read',
+    'notes:write',
     'audit:read',
     'reports:read',
   ],
@@ -51,6 +55,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'documents:write',
     'tasks:read',
     'tasks:write',
+    'notes:read',
+    'notes:write',
     'audit:read',
     'reports:read',
   ],
@@ -63,6 +69,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'documents:write',
     'tasks:read',
     'tasks:write',
+    'notes:read',
+    'notes:write',
     'reports:read',
   ],
   enrollment_specialist: [
@@ -76,6 +84,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'documents:write',
     'tasks:read',
     'tasks:write',
+    'notes:read',
+    'notes:write',
     'reports:read',
   ],
   viewer: [
@@ -85,6 +95,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'payers:read',
     'documents:read',
     'tasks:read',
+    'notes:read',
     'reports:read',
   ],
 };

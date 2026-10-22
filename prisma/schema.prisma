@@ -38,7 +38,9 @@ model User {
   followUpsCreated           EnrollmentFollowUp[]
   assignedTasks              Task[]                  @relation("AssignedTasks")
   createdTasks               Task[]                  @relation("CreatedTasks")
-  notes                      Note[]
+  completedTasks             Task[]                  @relation("CompletedTasks")
+  createdNotes               Note[]                  @relation("CreatedNotes")
+  updatedNotes               Note[]                  @relation("UpdatedNotes")
   verifications              VerificationHistory[]
   notifications              Notification[]
   auditLogs                  AuditLog[]
@@ -100,6 +102,8 @@ model Provider {
   enrollments          PayerEnrollment[]
   verificationHistory  VerificationHistory[]
   documents            Document[]              @relation("ProviderDocuments")
+  tasks                Task[]                  @relation("ProviderTasks")
+  providerNotes        Note[]                  @relation("ProviderNotes")
 
   @@map("providers")
 }
@@ -417,25 +421,35 @@ model DocumentVersion {
 }
 
 model Task {
-  id             String    @id @default(uuid()) @db.Uuid
-  title          String    @db.VarChar(255)
-  description    String?
-  entityType     String?   @map("entity_type") @db.VarChar(50)
-  entityId       String?   @map("entity_id") @db.Uuid
-  assignedToId   String?   @map("assigned_to") @db.Uuid
-  createdById    String?   @map("created_by") @db.Uuid
-  priority       String    @default("medium") @db.VarChar(20)
-  status         String    @default("pending") @db.VarChar(30)
-  dueDate        DateTime? @map("due_date") @db.Date
-  completedAt    DateTime? @map("completed_at") @db.Timestamptz()
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  id              String    @id @default(uuid()) @db.Uuid
+  title           String    @db.VarChar(255)
+  description     String?
+  taskType        String    @default("general") @map("task_type") @db.VarChar(50)
+  entityType      String?   @map("entity_type") @db.VarChar(50)
+  entityId        String?   @map("entity_id") @db.Uuid
+  providerId      String?   @map("provider_id") @db.Uuid
+  assignedToId    String?   @map("assigned_to") @db.Uuid
+  createdById     String?   @map("created_by") @db.Uuid
+  completedById   String?   @map("completed_by") @db.Uuid
+  priority        String    @default("medium") @db.VarChar(20)
+  status          String    @default("pending") @db.VarChar(30)
+  dueDate         DateTime? @map("due_date") @db.Date
+  completedAt     DateTime? @map("completed_at") @db.Timestamptz()
+  completionNotes String?   @map("completion_notes")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
 
-  assignedTo     User?     @relation("AssignedTasks", fields: [assignedToId], references: [id])
-  createdBy      User?     @relation("CreatedTasks", fields: [createdById], references: [id])
+  provider        Provider? @relation("ProviderTasks", fields: [providerId], references: [id], onDelete: Cascade)
+  assignedTo      User?     @relation("AssignedTasks", fields: [assignedToId], references: [id])
+  createdBy       User?     @relation("CreatedTasks", fields: [createdById], references: [id])
+  completedBy     User?     @relation("CompletedTasks", fields: [completedById], references: [id])
 
   @@index([assignedToId, status])
   @@index([dueDate, status])
+  @@index([providerId])
+  @@index([taskType])
+  @@index([priority])
+  @@index([status])
   @@map("tasks")
 }
 
@@ -443,15 +457,22 @@ model Note {
   id          String   @id @default(uuid()) @db.Uuid
   entityType  String   @map("entity_type") @db.VarChar(50)
   entityId    String   @map("entity_id") @db.Uuid
+  providerId  String?  @map("provider_id") @db.Uuid
   content     String
   isPinned    Boolean  @default(false) @map("is_pinned")
   createdById String?  @map("created_by") @db.Uuid
+  updatedById String?  @map("updated_by") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
 
-  createdBy   User?    @relation(fields: [createdById], references: [id])
+  provider    Provider? @relation("ProviderNotes", fields: [providerId], references: [id], onDelete: Cascade)
+  createdBy   User?    @relation("CreatedNotes", fields: [createdById], references: [id])
+  updatedBy   User?    @relation("UpdatedNotes", fields: [updatedById], references: [id])
 
   @@index([entityType, entityId])
+  @@index([providerId])
+  @@index([createdById])
+  @@index([isPinned])
   @@map("notes")
 }
 
