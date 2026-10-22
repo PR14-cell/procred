@@ -18,7 +18,8 @@ export type Permission =
   | 'notes:read'
   | 'notes:write'
   | 'audit:read'
-  | 'reports:read';
+  | 'reports:read'
+  | 'reports:export';
 
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   super_admin: [
@@ -40,6 +41,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'notes:write',
     'audit:read',
     'reports:read',
+    'reports:export',
   ],
   admin: [
     'users:manage',
@@ -59,6 +61,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'notes:write',
     'audit:read',
     'reports:read',
+    'reports:export',
   ],
   credentialing_specialist: [
     'providers:read',
@@ -72,6 +75,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'notes:read',
     'notes:write',
     'reports:read',
+    'reports:export',
   ],
   enrollment_specialist: [
     'providers:read',
@@ -87,6 +91,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'notes:read',
     'notes:write',
     'reports:read',
+    'reports:export',
   ],
   viewer: [
     'providers:read',

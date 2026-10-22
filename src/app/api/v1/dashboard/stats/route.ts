@@ -1,211 +1,37 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db/prisma';
 import { withErrorHandler } from '@/lib/errors/api-error';
+import { requireAuth } from '@/lib/auth/server-auth';
+import { ReportService, DateRangeFilter } from '@/lib/reports/report-service';
 
 export const dynamic = 'force-dynamic';
 
-export const GET = withErrorHandler(async () => {
-  const ninetyDaysFromNow = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
-  const now = new Date();
-  const todayDateOnly = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+// GET /api/v1/dashboard/stats - Executive dashboard aggregated statistics and attention alerts
+export const GET = withErrorHandler(async (req: Request) => {
+  await requireAuth(req, 'reports:read');
 
-  const [
-    totalUsers,
-    totalProviders,
-    expiringLicenses,
-    expiringDea,
-    expiringBoards,
-    expiringMalpractice,
-    expiringCaqh,
-    enrollmentsList,
-    overdueTasks,
-    documentsList,
-  ] = await Promise.all([
-    // 1. Total active users in the system
-    prisma.user.count({ where: { isActive: true } }),
+  const { searchParams } = new URL(req.url);
+  const filter: DateRangeFilter = {
+    timeRange: (searchParams.get('timeRange') as any) || 'all_time',
+    startDate: searchParams.get('startDate') || undefined,
+    endDate: searchParams.get('endDate') || undefined,
+  };
 
-    // 2. Total active healthcare providers
-    prisma.provider.count({ where: { status: 'active' } }),
-
-    // 3. Expiring state licenses within 90 days
-    prisma.stateLicense.count({
-      where: {
-        status: 'active',
-        expirationDate: {
-          lte: ninetyDaysFromNow,
-          gte: now,
-        },
-      },
-    }),
-
-    // 4. Expiring DEA registrations within 90 days
-    prisma.deaRegistration.count({
-      where: {
-        status: 'active',
-        expirationDate: {
-          lte: ninetyDaysFromNow,
-          gte: now,
-        },
-      },
-    }),
-
-    // 5. Expiring Board Certifications within 90 days
-    prisma.boardCertification.count({
-      where: {
-        status: 'active',
-        expirationDate: {
-          lte: ninetyDaysFromNow,
-          gte: now,
-        },
-      },
-    }),
-
-    // 6. Expiring Malpractice Policies within 90 days
-    prisma.malpracticeInsurance.count({
-      where: {
-        status: 'active',
-        expirationDate: {
-          lte: ninetyDaysFromNow,
-          gte: now,
-        },
-      },
-    }),
-
-    // 7. Expiring CAQH Attestations within 90 days
-    prisma.caqhProfile.count({
-      where: {
-        attestationStatus: { not: 'expired' },
-        nextAttestationDate: {
-          lte: ninetyDaysFromNow,
-          gte: now,
-        },
-      },
-    }),
-
-    // 8. Real database query across all enrollments
-    prisma.payerEnrollment.findMany({
-      select: {
-        status: true,
-        submittedDate: true,
-        followUpDate: true,
-        revalidationDate: true,
-      },
-    }),
-
-    // 9. Overdue tasks
-    prisma.task.count({
-      where: {
-        status: { in: ['pending', 'in_progress', 'open'] },
-        dueDate: {
-          lt: now,
-        },
-      },
-    }),
-
-    // 10. Document metrics
-    prisma.document.findMany({
-      select: {
-        status: true,
-        expirationDate: true,
-      },
-    }),
+  const [dashboardData, attentionItems] = await Promise.all([
+    ReportService.getExecutiveDashboard(filter),
+    ReportService.getOperationalAttentionItems(10),
   ]);
-
-  const totalExpiringCredentials =
-    expiringLicenses + expiringDea + expiringBoards + expiringMalpractice + expiringCaqh;
-
-  // Enrollment metrics calculations
-  const totalEnrollments = enrollmentsList.length;
-  const pendingEnrollments = enrollmentsList.filter((e) =>
-    ['submitted', 'pending', 'preparing'].includes(e.status)
-  ).length;
-  const needsInfoEnrollments = enrollmentsList.filter((e) => e.status === 'needs_info').length;
-  const approvedEnrollments = enrollmentsList.filter((e) => e.status === 'approved').length;
-  const activeEnrollments = enrollmentsList.filter((e) => e.status === 'active').length;
-  const deniedEnrollments = enrollmentsList.filter((e) => e.status === 'denied').length;
-  const terminatedEnrollments = enrollmentsList.filter((e) => e.status === 'terminated').length;
-  const revalidationRequiredEnrollments = enrollmentsList.filter(
-    (e) =>
-      e.status === 'revalidation_required' ||
-      (e.revalidationDate &&
-        new Date(e.revalidationDate) <= ninetyDaysFromNow &&
-        new Date(e.revalidationDate) >= now)
-  ).length;
-
-  const overdueFollowUps = enrollmentsList.filter(
-    (e) =>
-      e.followUpDate &&
-      new Date(e.followUpDate) < todayDateOnly &&
-      !['approved', 'active', 'terminated'].includes(e.status)
-  ).length;
-
-  const upcomingFollowUps = enrollmentsList.filter((e) => {
-    if (!e.followUpDate) return false;
-    const fDate = new Date(e.followUpDate);
-    return fDate >= todayDateOnly && fDate <= new Date(todayDateOnly.getTime() + 7 * 24 * 60 * 60 * 1000);
-  }).length;
-
-  // Aging pending enrollments (> 30 days pending)
-  const agingPendingEnrollments = enrollmentsList.filter((e) => {
-    if (!e.submittedDate || !['submitted', 'pending', 'preparing', 'needs_info'].includes(e.status)) return false;
-    const subTime = new Date(e.submittedDate).getTime();
-    const diffDays = Math.floor((now.getTime() - subTime) / (1000 * 60 * 60 * 24));
-    return diffDays > 30;
-  }).length;
-
-  // Document metrics calculations
-  const totalDocuments = documentsList.length;
-  const pendingReviewDocuments = documentsList.filter(
-    (d) => d.status === 'pending_review' || d.status === 'uploaded'
-  ).length;
-  const verifiedDocuments = documentsList.filter((d) => d.status === 'verified').length;
-  const rejectedDocuments = documentsList.filter((d) => d.status === 'rejected').length;
-  const expiringDocuments = documentsList.filter((d) => {
-    if (!d.expirationDate) return false;
-    const exp = new Date(d.expirationDate);
-    return exp >= todayDateOnly && exp <= new Date(todayDateOnly.getTime() + 30 * 24 * 60 * 60 * 1000);
-  }).length;
 
   return NextResponse.json({
     stats: {
-      totalUsers,
-      totalProviders,
-      expiringCredentials: totalExpiringCredentials,
-      breakdown: {
-        licenses: expiringLicenses,
-        dea: expiringDea,
-        boardCertifications: expiringBoards,
-        malpractice: expiringMalpractice,
-        caqh: expiringCaqh,
-      },
-      documents: {
-        total: totalDocuments,
-        pendingReview: pendingReviewDocuments,
-        verified: verifiedDocuments,
-        rejected: rejectedDocuments,
-        expiringSoon: expiringDocuments,
-      },
-      enrollments: {
-        total: totalEnrollments,
-        pending: pendingEnrollments,
-        needsInfo: needsInfoEnrollments,
-        approved: approvedEnrollments,
-        active: activeEnrollments,
-        denied: deniedEnrollments,
-        terminated: terminatedEnrollments,
-        revalidationRequired: revalidationRequiredEnrollments,
-        overdueFollowUps,
-        upcomingFollowUps,
-        agingPending: agingPendingEnrollments,
-      },
-      pendingEnrollments,
-      overdueTasks,
+      ...dashboardData,
+      // Backwards-compatible aliases for previously defined widgets
+      totalUsers: dashboardData.providers.total, // baseline
+      totalProviders: dashboardData.providers.total,
+      expiringCredentials: dashboardData.credentials.expiringSoon,
+      pendingEnrollments: dashboardData.enrollments.pending,
+      overdueTasks: dashboardData.tasks.overdue,
     },
-    deferredMetrics: {
-      expirationTimeline: 'Phase 6 (visual timeline chart)',
-      enrollmentStatusChart: 'Phase 6 (visual breakdown chart)',
-      missingDocumentsSummary: 'Phase 6 (requires documents & payer rule scanner)',
-    },
+    actionRequired: attentionItems,
     retrievedAt: new Date().toISOString(),
   });
 });
