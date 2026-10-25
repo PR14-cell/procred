@@ -1,18 +1,26 @@
 import { z } from 'zod';
 
-export const DocumentTypeEnum = z.enum([
-  'state_license',
-  'dea_registration',
-  'board_certification',
-  'malpractice_insurance',
-  'caqh_profile',
-  'payer_application',
-  'payer_approval_letter',
-  'w9',
-  'identity_proof',
-  'cme_certificate',
-  'other',
-]);
+export const DocumentTypeEnum = z.enum(
+  [
+    'state_license',
+    'dea_registration',
+    'board_certification',
+    'malpractice_insurance',
+    'caqh_profile',
+    'payer_application',
+    'payer_approval_letter',
+    'w9',
+    'group_npi_letter',
+    'group_malpractice_coi',
+    'group_payer_agreement',
+    'identity_proof',
+    'cme_certificate',
+    'other',
+  ],
+  {
+    errorMap: () => ({ message: 'Document category is required and must be a supported type' }),
+  }
+);
 
 export type DocumentType = z.infer<typeof DocumentTypeEnum>;
 
@@ -33,32 +41,77 @@ export const DocumentEntityTypeEnum = z.enum([
   'payer_enrollment',
   'payer',
   'location',
+  'general',
+  'organization',
 ]);
 
 export type DocumentEntityType = z.infer<typeof DocumentEntityTypeEnum>;
 
+export const ALLOWED_DOCUMENT_MIME_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+] as const;
+
 // 1. Create Document with Initial Version
 export const createDocumentSchema = z
   .object({
-    entityType: DocumentEntityTypeEnum,
-    entityId: z.string().uuid('Invalid entity ID'),
-    providerId: z.string().uuid('Invalid provider ID').optional().nullable(),
+    entityType: DocumentEntityTypeEnum.optional().default('general'),
+    entityId: z.string().uuid('Invalid entity ID').optional(),
+    providerId: z
+      .union([z.string().uuid('Invalid provider ID'), z.literal(''), z.null(), z.undefined()])
+      .transform((val) => (val === '' ? null : val)),
     documentType: DocumentTypeEnum,
-    title: z.string().min(2, 'Title must be at least 2 characters').max(255),
-    description: z.string().optional().nullable(),
+    title: z
+      .string({ required_error: 'Document title is required' })
+      .trim()
+      .min(1, 'Document title is required')
+      .min(2, 'Document title must be at least 2 characters')
+      .max(255, 'Document title cannot exceed 255 characters'),
+    description: z.string().trim().optional().nullable(),
     issueDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Issue date must be YYYY-MM-DD')
-      .optional()
-      .nullable(),
+      .union([
+        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Issue date must be in YYYY-MM-DD format'),
+        z.literal(''),
+        z.null(),
+        z.undefined(),
+      ])
+      .transform((val) => (val === '' ? null : val))
+      .refine(
+        (val) => {
+          if (!val) return true;
+          const d = new Date(val);
+          return !isNaN(d.getTime());
+        },
+        { message: 'Invalid issue date' }
+      ),
     expirationDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expiration date must be YYYY-MM-DD')
-      .optional()
-      .nullable(),
-    fileName: z.string().min(1, 'File name is required').max(255),
-    mimeType: z.string().min(1, 'MIME type is required'),
-    fileBase64: z.string().min(1, 'File data is required'),
+      .union([
+        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expiration date must be in YYYY-MM-DD format'),
+        z.literal(''),
+        z.null(),
+        z.undefined(),
+      ])
+      .transform((val) => (val === '' ? null : val))
+      .refine(
+        (val) => {
+          if (!val) return true;
+          const d = new Date(val);
+          return !isNaN(d.getTime());
+        },
+        { message: 'Invalid expiration date' }
+      ),
+    fileName: z
+      .string({ required_error: 'File name is required' })
+      .trim()
+      .min(1, 'File name is required')
+      .max(255, 'File name cannot exceed 255 characters'),
+    mimeType: z.enum(ALLOWED_DOCUMENT_MIME_TYPES, {
+      errorMap: () => ({ message: 'File type must be PDF, JPEG, or PNG' }),
+    }),
+    fileBase64: z
+      .string({ required_error: 'File data is required' })
+      .min(1, 'File data is required'),
   })
   .refine(
     (data) => {
@@ -68,7 +121,7 @@ export const createDocumentSchema = z
       return true;
     },
     {
-      message: 'Expiration date must be after or on issue date',
+      message: 'Expiration date must be on or after issue date',
       path: ['expirationDate'],
     }
   );
@@ -77,10 +130,18 @@ export type CreateDocumentInput = z.infer<typeof createDocumentSchema>;
 
 // 2. Add New Version to Existing Document
 export const addDocumentVersionSchema = z.object({
-  fileName: z.string().min(1, 'File name is required').max(255),
-  mimeType: z.string().min(1, 'MIME type is required'),
-  fileBase64: z.string().min(1, 'File data is required'),
-  notes: z.string().optional().nullable(),
+  fileName: z
+    .string({ required_error: 'File name is required' })
+    .trim()
+    .min(1, 'File name is required')
+    .max(255),
+  mimeType: z.enum(ALLOWED_DOCUMENT_MIME_TYPES, {
+    errorMap: () => ({ message: 'File type must be PDF, JPEG, or PNG' }),
+  }),
+  fileBase64: z
+    .string({ required_error: 'File data is required' })
+    .min(1, 'File data is required'),
+  notes: z.string().trim().optional().nullable(),
 });
 
 export type AddDocumentVersionInput = z.infer<typeof addDocumentVersionSchema>;
@@ -88,19 +149,33 @@ export type AddDocumentVersionInput = z.infer<typeof addDocumentVersionSchema>;
 // 3. Update Document Metadata
 export const updateDocumentMetadataSchema = z
   .object({
-    title: z.string().min(2).max(255).optional(),
-    description: z.string().optional().nullable(),
+    title: z
+      .string()
+      .trim()
+      .min(1, 'Document title cannot be empty')
+      .min(2, 'Document title must be at least 2 characters')
+      .max(255)
+      .optional(),
+    description: z.string().trim().optional().nullable(),
     documentType: DocumentTypeEnum.optional(),
     issueDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .optional()
-      .nullable(),
+      .union([
+        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Issue date must be in YYYY-MM-DD format'),
+        z.literal(''),
+        z.null(),
+        z.undefined(),
+      ])
+      .transform((val) => (val === '' ? null : val))
+      .optional(),
     expirationDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .optional()
-      .nullable(),
+      .union([
+        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expiration date must be in YYYY-MM-DD format'),
+        z.literal(''),
+        z.null(),
+        z.undefined(),
+      ])
+      .transform((val) => (val === '' ? null : val))
+      .optional(),
   })
   .refine(
     (data) => {
@@ -110,7 +185,7 @@ export const updateDocumentMetadataSchema = z
       return true;
     },
     {
-      message: 'Expiration date must be after or on issue date',
+      message: 'Expiration date must be on or after issue date',
       path: ['expirationDate'],
     }
   );
@@ -121,8 +196,8 @@ export type UpdateDocumentMetadataInput = z.infer<typeof updateDocumentMetadataS
 export const verifyDocumentSchema = z
   .object({
     status: z.enum(['verified', 'rejected', 'pending_review']),
-    verificationNotes: z.string().optional().nullable(),
-    rejectionReason: z.string().optional().nullable(),
+    verificationNotes: z.string().trim().optional().nullable(),
+    rejectionReason: z.string().trim().optional().nullable(),
   })
   .refine(
     (data) => {

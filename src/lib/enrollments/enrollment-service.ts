@@ -6,6 +6,7 @@ export interface EnrollmentFilterOptions {
   search?: string;
   providerId?: string;
   payerId?: string;
+  organizationId?: string;
   status?: string;
   enrollmentType?: 'individual' | 'group' | 'all';
   assignedToId?: string;
@@ -69,6 +70,7 @@ export async function getEnrollments(options: EnrollmentFilterOptions = {}) {
     search,
     providerId,
     payerId,
+    organizationId,
     status,
     enrollmentType = 'all',
     assignedToId,
@@ -86,6 +88,7 @@ export async function getEnrollments(options: EnrollmentFilterOptions = {}) {
 
   if (providerId) where.providerId = providerId;
   if (payerId) where.payerId = payerId;
+  if (organizationId) where.organizationId = organizationId;
   if (status && status !== 'all') where.status = status;
   if (enrollmentType && enrollmentType !== 'all') where.enrollmentType = enrollmentType;
   if (assignedToId) where.assignedToId = assignedToId;
@@ -138,6 +141,14 @@ export async function getEnrollments(options: EnrollmentFilterOptions = {}) {
           name: true,
           city: true,
           state: true,
+        },
+      },
+      organization: {
+        select: {
+          id: true,
+          name: true,
+          dbaName: true,
+          npiNumber: true,
         },
       },
       assignedTo: {

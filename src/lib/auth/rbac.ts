@@ -11,15 +11,22 @@ export type Permission =
   | 'enrollments:write'
   | 'payers:read'
   | 'payers:write'
+  | 'organizations:read'
+  | 'organizations:write'
   | 'documents:read'
   | 'documents:write'
+  | 'documents:delete'
   | 'tasks:read'
   | 'tasks:write'
   | 'notes:read'
   | 'notes:write'
   | 'audit:read'
   | 'reports:read'
-  | 'reports:export';
+  | 'reports:export'
+  | 'jobs:manage'
+  | 'system:backup'
+  | 'system:restore'
+  | 'pii:reveal';
 
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   super_admin: [
@@ -33,8 +40,11 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'enrollments:write',
     'payers:read',
     'payers:write',
+    'organizations:read',
+    'organizations:write',
     'documents:read',
     'documents:write',
+    'documents:delete',
     'tasks:read',
     'tasks:write',
     'notes:read',
@@ -42,6 +52,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'audit:read',
     'reports:read',
     'reports:export',
+    'jobs:manage',
+    'system:backup',
+    'system:restore',
+    'pii:reveal',
   ],
   admin: [
     'users:manage',
@@ -53,8 +67,11 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'enrollments:write',
     'payers:read',
     'payers:write',
+    'organizations:read',
+    'organizations:write',
     'documents:read',
     'documents:write',
+    'documents:delete',
     'tasks:read',
     'tasks:write',
     'notes:read',
@@ -62,12 +79,19 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'audit:read',
     'reports:read',
     'reports:export',
+    'jobs:manage',
+    'system:backup',
+    'pii:reveal',
   ],
   credentialing_specialist: [
     'providers:read',
     'providers:write',
     'credentials:read',
     'credentials:write',
+    'enrollments:read',
+    'payers:read',
+    'organizations:read',
+    'organizations:write',
     'documents:read',
     'documents:write',
     'tasks:read',
@@ -84,6 +108,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'enrollments:write',
     'payers:read',
     'payers:write',
+    'organizations:read',
     'documents:read',
     'documents:write',
     'tasks:read',
@@ -98,6 +123,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'credentials:read',
     'enrollments:read',
     'payers:read',
+    'organizations:read',
     'documents:read',
     'tasks:read',
     'notes:read',

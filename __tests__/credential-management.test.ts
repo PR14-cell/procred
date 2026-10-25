@@ -35,7 +35,20 @@ describe('Phase 3: Credential & Expiration Tracking Module', () => {
     });
     testUserId = user.id;
 
-    // 2. Create test provider with synthetic/fictional data
+    // 2. Clean up any existing provider with npi 9988776655
+    const existingProvider = await prisma.provider.findUnique({ where: { npiNumber: '9988776655' } });
+    if (existingProvider) {
+      await prisma.verificationHistory.deleteMany({ where: { providerId: existingProvider.id } });
+      await prisma.task.deleteMany({ where: { OR: [{ entityId: existingProvider.id }, { providerId: existingProvider.id }] } });
+      await prisma.stateLicense.deleteMany({ where: { providerId: existingProvider.id } });
+      await prisma.deaRegistration.deleteMany({ where: { providerId: existingProvider.id } });
+      await prisma.boardCertification.deleteMany({ where: { providerId: existingProvider.id } });
+      await prisma.malpracticeInsurance.deleteMany({ where: { providerId: existingProvider.id } });
+      await prisma.caqhProfile.deleteMany({ where: { providerId: existingProvider.id } });
+      await prisma.provider.delete({ where: { id: existingProvider.id } });
+    }
+
+    // 3. Create test provider with synthetic/fictional data
     const provider = await prisma.provider.create({
       data: {
         firstName: 'Eleanor',
@@ -51,30 +64,34 @@ describe('Phase 3: Credential & Expiration Tracking Module', () => {
 
   afterAll(async () => {
     // Cleanup created test records
-    await prisma.verificationHistory.deleteMany({
-      where: { providerId: testProviderId },
-    });
-    await prisma.task.deleteMany({
-      where: {
-        OR: [
-          { entityId: testProviderId },
-          { entityId: { in: createdCredentialIds.map((c) => c.id) } },
-        ],
-      },
-    });
-    await prisma.notification.deleteMany({
-      where: { userId: testUserId },
-    });
-    await prisma.document.deleteMany({
-      where: { entityId: { in: createdCredentialIds.map((c) => c.id) } },
-    });
-    await prisma.stateLicense.deleteMany({ where: { providerId: testProviderId } });
-    await prisma.deaRegistration.deleteMany({ where: { providerId: testProviderId } });
-    await prisma.boardCertification.deleteMany({ where: { providerId: testProviderId } });
-    await prisma.malpracticeInsurance.deleteMany({ where: { providerId: testProviderId } });
-    await prisma.caqhProfile.deleteMany({ where: { providerId: testProviderId } });
-    await prisma.provider.delete({ where: { id: testProviderId } });
-    await prisma.user.delete({ where: { id: testUserId } });
+    if (testProviderId) {
+      await prisma.verificationHistory.deleteMany({
+        where: { providerId: testProviderId },
+      });
+      await prisma.task.deleteMany({
+        where: {
+          OR: [
+            { entityId: testProviderId },
+            { entityId: { in: createdCredentialIds.map((c) => c.id) } },
+          ],
+        },
+      });
+      await prisma.notification.deleteMany({
+        where: { userId: testUserId },
+      });
+      await prisma.document.deleteMany({
+        where: { entityId: { in: createdCredentialIds.map((c) => c.id) } },
+      });
+      await prisma.stateLicense.deleteMany({ where: { providerId: testProviderId } });
+      await prisma.deaRegistration.deleteMany({ where: { providerId: testProviderId } });
+      await prisma.boardCertification.deleteMany({ where: { providerId: testProviderId } });
+      await prisma.malpracticeInsurance.deleteMany({ where: { providerId: testProviderId } });
+      await prisma.caqhProfile.deleteMany({ where: { providerId: testProviderId } });
+      await prisma.provider.delete({ where: { id: testProviderId } });
+    }
+    if (testUserId) {
+      await prisma.user.delete({ where: { id: testUserId } });
+    }
   });
 
   // ==========================================

@@ -150,7 +150,7 @@ export const POST = withErrorHandler(async (req: Request) => {
 
     case 'caqh_profile': {
       const data = createCaqhSchema.parse(body);
-      const passwordEncrypted = data.password ? encrypt(data.password) : null;
+      const passwordEncrypted = data.password ? encrypt(data.password, 'credential.password') : null;
       const caqh = await prisma.caqhProfile.create({
         data: {
           providerId: data.providerId,

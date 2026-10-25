@@ -88,6 +88,7 @@ export const PUT = withErrorHandler(async (req: Request, context?: RouteContext)
     where: { id: enrollmentId },
     data: {
       locationId: data.locationId !== undefined ? data.locationId : existing.locationId,
+      organizationId: data.organizationId !== undefined ? data.organizationId : existing.organizationId,
       enrollmentType: data.enrollmentType ?? existing.enrollmentType,
       applicationType: data.applicationType ?? existing.applicationType,
       status: data.status ?? existing.status,

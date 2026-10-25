@@ -25,12 +25,18 @@ model User {
   role                       UserRole  @default(viewer)
   isActive                   Boolean   @default(true) @map("is_active")
   mfaEnabled                 Boolean   @default(false) @map("mfa_enabled")
+  mfaEnrolledAt              DateTime? @map("mfa_enrolled_at") @db.Timestamptz()
   totpSecretEncrypted        Bytes?    @map("totp_secret_encrypted")
+  mfaPendingSecretEncrypted   Bytes?    @map("mfa_pending_secret_encrypted")
   mfaBackupCodesEncrypted    Bytes?    @map("mfa_backup_codes_encrypted")
+  failedLoginAttempts        Int       @default(0) @map("failed_login_attempts")
+  lockedUntil                DateTime? @map("locked_until") @db.Timestamptz()
+  lastTotpTimestamp          BigInt?   @map("last_totp_timestamp")
   lastLoginAt                DateTime? @map("last_login_at") @db.Timestamptz()
   createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt                  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
 
+  recoveryCodes              UserRecoveryCode[]
   sessions                   UserSession[]
   assignedEnrollments        PayerEnrollment[]       @relation("AssignedEnrollments")
   createdEnrollments         PayerEnrollment[]       @relation("CreatedEnrollments")
@@ -43,6 +49,7 @@ model User {
   updatedNotes               Note[]                  @relation("UpdatedNotes")
   verifications              VerificationHistory[]
   notifications              Notification[]
+  notificationPreference     NotificationPreference?
   auditLogs                  AuditLog[]
   uploadedDocuments          Document[]              @relation("UploadedDocuments")
   uploadedVersions           DocumentVersion[]       @relation("UploadedVersions")
@@ -67,6 +74,28 @@ model UserSession {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_sessions")
+}
+
+model UserRecoveryCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @map("code_hash") @db.VarChar(255)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz()
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_recovery_codes")
+}
+
+model SystemSetting {
+  key       String   @id @db.VarChar(100)
+  value     String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  @@map("system_settings")
 }
 
 model Provider {
@@ -104,6 +133,7 @@ model Provider {
   documents            Document[]              @relation("ProviderDocuments")
   tasks                Task[]                  @relation("ProviderTasks")
   providerNotes        Note[]                  @relation("ProviderNotes")
+  organizations        ProviderOrganization[]
 
   @@map("providers")
 }
@@ -294,6 +324,7 @@ model PayerEnrollment {
   providerPayerId         String?   @map("provider_payer_id") @db.VarChar(50)
   groupNumber             String?   @map("group_number") @db.VarChar(50)
   groupNpi                String?   @map("group_npi") @db.VarChar(10)
+  organizationId          String?   @map("organization_id") @db.Uuid
   enrollmentType          String    @default("individual") @map("enrollment_type") @db.VarChar(20)
   applicationType         String    @default("initial") @map("application_type") @db.VarChar(50)
   status                  String    @default("not_started") @db.VarChar(30)
@@ -312,17 +343,19 @@ model PayerEnrollment {
   createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
 
-  provider                Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  payer                   Payer     @relation(fields: [payerId], references: [id])
-  location                Location? @relation(fields: [locationId], references: [id])
-  assignedTo              User?     @relation("AssignedEnrollments", fields: [assignedToId], references: [id])
-  createdBy               User?     @relation("CreatedEnrollments", fields: [createdById], references: [id])
+  provider                Provider      @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  payer                   Payer         @relation(fields: [payerId], references: [id])
+  location                Location?     @relation(fields: [locationId], references: [id])
+  organization            Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  assignedTo              User?         @relation("AssignedEnrollments", fields: [assignedToId], references: [id])
+  createdBy               User?         @relation("CreatedEnrollments", fields: [createdById], references: [id])
 
   statusHistory           EnrollmentStatusHistory[]
   followUps               EnrollmentFollowUp[]
 
   @@index([providerId])
   @@index([payerId])
+  @@index([organizationId])
   @@index([status])
   @@index([revalidationDate])
   @@index([effectiveDate])
@@ -537,6 +570,23 @@ model Notification {
   @@map("notifications")
 }
 
+model NotificationPreference {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @unique @map("user_id") @db.Uuid
+  emailEnabled       Boolean  @default(true) @map("email_enabled")
+  expirationAlerts   Boolean  @default(true) @map("expiration_alerts")
+  revalidationAlerts Boolean  @default(true) @map("revalidation_alerts")
+  taskAlerts         Boolean  @default(true) @map("task_alerts")
+  missingDocAlerts   Boolean  @default(true) @map("missing_doc_alerts")
+  dailyDigest        Boolean  @default(true) @map("daily_digest")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
 model TaxonomyCode {
   code           String   @id @db.VarChar(20)
   classification String   @db.VarChar(255)
@@ -558,4 +608,53 @@ model CredentialExpirationRule {
   updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
 
   @@map("credential_expiration_rules")
+}
+
+model Organization {
+  id               String                 @id @default(uuid()) @db.Uuid
+  name             String                 @db.VarChar(255)
+  dbaName          String?                @map("dba_name") @db.VarChar(255)
+  npiNumber        String?                @unique @map("npi_number") @db.VarChar(10)
+  taxIdEncrypted   Bytes?                 @map("tax_id_encrypted")
+  taxIdLastFour    String?                @map("tax_id_last_four") @db.VarChar(4)
+  organizationType String                 @default("medical_group") @map("organization_type") @db.VarChar(50)
+  address1         String                 @db.VarChar(255)
+  address2         String?                @db.VarChar(255)
+  city             String                 @db.VarChar(100)
+  state            String                 @db.VarChar(2)
+  zipCode          String                 @map("zip_code") @db.VarChar(10)
+  phone            String?                @db.VarChar(20)
+  email            String?                @db.VarChar(255)
+  website          String?                @db.VarChar(255)
+  status           String                 @default("active") @db.VarChar(30)
+  notes            String?
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  providers        ProviderOrganization[]
+  enrollments      PayerEnrollment[]
+
+  @@index([name])
+  @@index([status])
+  @@map("organizations")
+}
+
+model ProviderOrganization {
+  id             String       @id @default(uuid()) @db.Uuid
+  providerId     String       @map("provider_id") @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  isPrimary      Boolean      @default(false) @map("is_primary")
+  employmentType String?      @map("employment_type") @db.VarChar(50)
+  startDate      DateTime?    @map("start_date") @db.Date
+  endDate        DateTime?    @map("end_date") @db.Date
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider       Provider     @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, organizationId])
+  @@index([providerId])
+  @@index([organizationId])
+  @@map("provider_organizations")
 }

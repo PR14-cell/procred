@@ -176,6 +176,26 @@ interface ProviderProfile {
     location: { id: string; name: string; city: string; state: string } | null;
     assignedTo: { firstName: string; lastName: string } | null;
   }>;
+  organizations?: Array<{
+    id: string;
+    providerId: string;
+    organizationId: string;
+    isPrimary: boolean;
+    employmentType: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    organization: {
+      id: string;
+      name: string;
+      dbaName: string | null;
+      npiNumber: string | null;
+      organizationType: string;
+      city: string;
+      state: string;
+      phone: string | null;
+      status: string;
+    };
+  }>;
 }
 
 function renderExpirationBadge(dateStr: string | null | undefined) {
@@ -212,13 +232,21 @@ export default function ProviderProfilePage() {
   const [newNoteContent, setNewNoteContent] = useState('');
   const [newNotePinned, setNewNotePinned] = useState(false);
   const [submittingNote, setSubmittingNote] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'specialties' | 'locations' | 'credentials' | 'enrollments' | 'documents' | 'tasks' | 'notes' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'organizations' | 'specialties' | 'locations' | 'credentials' | 'enrollments' | 'documents' | 'tasks' | 'notes' | 'audit'>('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Reveal SSN state
   const [revealingSsn, setRevealingSsn] = useState(false);
   const [unmaskedSsn, setUnmaskedSsn] = useState<string | null>(null);
+
+  // Group / Organization Affiliation State
+  const [showAffiliateOrgModal, setShowAffiliateOrgModal] = useState(false);
+  const [allOrganizations, setAllOrganizations] = useState<Array<{ id: string; name: string; dbaName: string | null; npiNumber: string | null; city: string; state: string }>>([]);
+  const [affiliateOrgId, setAffiliateOrgId] = useState('');
+  const [affiliateEmploymentType, setAffiliateEmploymentType] = useState('employed');
+  const [affiliateIsPrimary, setAffiliateIsPrimary] = useState(false);
+  const [affiliateSubmitting, setAffiliateSubmitting] = useState(false);
 
   // Add Specialty Modal
   const [showAddSpecialtyModal, setShowAddSpecialtyModal] = useState(false);
@@ -293,9 +321,10 @@ export default function ProviderProfilePage() {
   // Load lookup data for modals
   const loadLookups = async () => {
     try {
-      const [taxRes, locRes] = await Promise.all([
+      const [taxRes, locRes, orgRes] = await Promise.all([
         fetch('/api/v1/taxonomy'),
         fetch('/api/v1/locations'),
+        fetch('/api/v1/organizations?limit=100&status=active'),
       ]);
       if (taxRes.ok) {
         const taxData = await taxRes.json();
@@ -305,8 +334,80 @@ export default function ProviderProfilePage() {
         const locData = await locRes.json();
         setAllLocations(locData.locations || []);
       }
+      if (orgRes.ok) {
+        const orgData = await orgRes.json();
+        setAllOrganizations(orgData.organizations || []);
+      }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleAffiliateOrg = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!affiliateOrgId || !providerId) return;
+    try {
+      setAffiliateSubmitting(true);
+      const res = await fetch(`/api/v1/organizations/${affiliateOrgId}/providers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          providerId,
+          employmentType: affiliateEmploymentType || null,
+          isPrimary: affiliateIsPrimary,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Failed to affiliate organization');
+      setShowAffiliateOrgModal(false);
+      setAffiliateOrgId('');
+      setAffiliateEmploymentType('employed');
+      setAffiliateIsPrimary(false);
+      fetchProvider();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Error affiliating organization');
+    } finally {
+      setAffiliateSubmitting(false);
+    }
+  };
+
+  const handleSetPrimaryOrg = async (orgId: string, currentEmploymentType: string | null) => {
+    try {
+      const res = await fetch(`/api/v1/organizations/${orgId}/providers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          providerId,
+          employmentType: currentEmploymentType || null,
+          isPrimary: true,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.message || 'Failed to set primary organization');
+      }
+      fetchProvider();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Error updating primary organization');
+    }
+  };
+
+  const handleDisassociateOrg = async (orgId: string, orgName: string) => {
+    if (
+      !confirm(
+        `Are you sure you want to disassociate provider from "${orgName}"? Provider records, licenses, documents, and enrollments will remain intact.`
+      )
+    )
+      return;
+    try {
+      const res = await fetch(`/api/v1/organizations/${orgId}/providers?providerId=${providerId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Failed to disassociate organization');
+      fetchProvider();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Error disassociating organization');
     }
   };
 
@@ -767,6 +868,23 @@ export default function ProviderProfilePage() {
 
         <button
           onClick={() => {
+            setActiveTab('organizations');
+            loadLookups();
+          }}
+          className={`pb-3 transition flex items-center space-x-1.5 ${
+            activeTab === 'organizations'
+              ? 'text-blue-600 font-bold border-b-2 border-blue-600'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <span>Organizations / Groups</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[11px] bg-slate-100 text-slate-600">
+            {provider.organizations?.length || 0}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
             setActiveTab('specialties');
             loadLookups();
           }}
@@ -972,6 +1090,93 @@ export default function ProviderProfilePage() {
             </div>
           </div>
 
+          {/* Affiliated Organizations / Groups Overview Card */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 col-span-1 md:col-span-2 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider text-xs">
+                  Affiliated Organizations / Groups
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Medical groups and health systems billing or credentialing for this provider
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('organizations');
+                  loadLookups();
+                }}
+                className="text-xs text-blue-600 hover:text-blue-800 font-semibold hover:underline"
+              >
+                Manage All Affiliations ({provider.organizations?.length || 0}) →
+              </button>
+            </div>
+
+            {!provider.organizations || provider.organizations.length === 0 ? (
+              <div className="py-4 px-3 bg-slate-50 rounded-lg text-slate-500 text-xs flex items-center justify-between">
+                <div>
+                  <span className="font-semibold text-slate-700">Solo / Independent Practitioner</span>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    No medical group or organization affiliations currently linked to this provider.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    loadLookups();
+                    setShowAffiliateOrgModal(true);
+                  }}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold"
+                >
+                  + Affiliate Group
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {provider.organizations.map((po) => (
+                  <div
+                    key={po.id}
+                    className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/50 flex flex-col justify-between space-y-2"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <Link
+                            href={`/organizations/${po.organization.id}`}
+                            className="font-bold text-slate-900 text-xs hover:text-blue-600 hover:underline"
+                          >
+                            {po.organization.name}
+                          </Link>
+                          {po.isPrimary && (
+                            <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold text-[10px]">
+                              ★ PRIMARY
+                            </span>
+                          )}
+                        </div>
+                        {po.organization.dbaName && (
+                          <div className="text-[11px] text-slate-500">DBA: {po.organization.dbaName}</div>
+                        )}
+                      </div>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase bg-slate-200 text-slate-700">
+                        {po.employmentType ? po.employmentType.replace('_', ' ') : 'Affiliate'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-200/60">
+                      <span>
+                        NPI: <strong className="font-mono text-slate-700">{po.organization.npiNumber || 'N/A'}</strong>
+                      </span>
+                      <span>
+                        {po.organization.city}, {po.organization.state}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Notes Card */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 col-span-1 md:col-span-2">
             <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider text-xs border-b border-slate-100 pb-2 mb-3">
@@ -981,6 +1186,118 @@ export default function ProviderProfilePage() {
               {provider.notes || 'No notes added for this provider.'}
             </p>
           </div>
+        </div>
+      )}
+
+      {/* Tab: Organizations Affiliations (Many-to-Many) */}
+      {activeTab === 'organizations' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Affiliated Organizations / Groups (Many-to-Many)</h2>
+              <p className="text-xs text-slate-500">
+                Healthcare organizations, medical groups, and hospitals where this provider is credentialed
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                loadLookups();
+                setShowAffiliateOrgModal(true);
+              }}
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+            >
+              + Affiliate Organization
+            </button>
+          </div>
+
+          {!provider.organizations || provider.organizations.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 text-xs space-y-2">
+              <div className="text-2xl">🏢</div>
+              <div className="font-semibold text-slate-600">No Organization Affiliations</div>
+              <p className="text-slate-400 max-w-sm mx-auto">
+                This provider is currently designated as a solo / independent practitioner.
+                Click &quot;+ Affiliate Organization&quot; to link to an established medical group.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+              {provider.organizations.map((po) => (
+                <div
+                  key={po.id}
+                  className="p-4 hover:bg-slate-50/70 transition flex flex-col md:flex-row md:items-center justify-between gap-4"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center space-x-2">
+                      <Link
+                        href={`/organizations/${po.organization.id}`}
+                        className="font-bold text-sm text-slate-900 hover:text-blue-600 hover:underline"
+                      >
+                        {po.organization.name}
+                      </Link>
+                      {po.isPrimary ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                          ★ PRIMARY AFFILIATION
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleSetPrimaryOrg(po.organization.id, po.employmentType)}
+                          className="px-2 py-0.5 rounded text-[10px] font-medium border border-slate-300 text-slate-600 hover:bg-white"
+                        >
+                          Make Primary
+                        </button>
+                      )}
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium capitalize bg-slate-100 text-slate-700">
+                        {po.employmentType ? po.employmentType.replace('_', ' ') : 'Affiliate'}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                      {po.organization.dbaName && (
+                        <span>
+                          DBA: <strong>{po.organization.dbaName}</strong>
+                        </span>
+                      )}
+                      <span>
+                        Type 2 NPI:{' '}
+                        <strong className="font-mono text-slate-800">
+                          {po.organization.npiNumber || 'N/A'}
+                        </strong>
+                      </span>
+                      <span>•</span>
+                      <span>Type: {po.organization.organizationType.replace('_', ' ')}</span>
+                      <span>•</span>
+                      <span>
+                        {po.organization.city}, {po.organization.state}
+                      </span>
+                      {po.organization.phone && (
+                        <>
+                          <span>•</span>
+                          <span>{po.organization.phone}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <Link
+                      href={`/organizations/${po.organization.id}`}
+                      className="px-3 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-medium rounded-lg"
+                    >
+                      View Organization
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => handleDisassociateOrg(po.organization.id, po.organization.name)}
+                      className="px-3 py-1.5 border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-medium rounded-lg"
+                    >
+                      Disassociate
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -2362,6 +2679,92 @@ export default function ProviderProfilePage() {
                   className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-medium rounded-lg"
                 >
                   {taskSubmitting ? 'Creating...' : 'Create Task'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Affiliate Organization */}
+      {showAffiliateOrgModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 border border-slate-200">
+            <h3 className="text-base font-bold text-slate-900 mb-1">Affiliate Organization</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Associate this provider with an existing medical group or healthcare system
+            </p>
+
+            <form onSubmit={handleAffiliateOrg} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Select Organization *
+                </label>
+                {allOrganizations.length === 0 ? (
+                  <div className="text-xs text-slate-500 p-3 bg-slate-50 rounded-lg">
+                    Loading organizations from directory...
+                  </div>
+                ) : (
+                  <select
+                    required
+                    value={affiliateOrgId}
+                    onChange={(e) => setAffiliateOrgId(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                  >
+                    <option value="">-- Choose an organization --</option>
+                    {allOrganizations.map((org) => (
+                      <option key={org.id} value={org.id}>
+                        {org.name} {org.dbaName ? `(${org.dbaName})` : ''} - NPI: {org.npiNumber || 'N/A'} ({org.city}, {org.state})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Employment / Affiliation Type
+                </label>
+                <select
+                  value={affiliateEmploymentType}
+                  onChange={(e) => setAffiliateEmploymentType(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                >
+                  <option value="employed">W-2 Employed</option>
+                  <option value="contractor">1099 Independent Contractor</option>
+                  <option value="affiliate">Affiliated Staff</option>
+                  <option value="owner">Partner / Owner</option>
+                  <option value="locum_tenens">Locum Tenens</option>
+                </select>
+              </div>
+
+              <div className="flex items-center space-x-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="affiliateIsPrimary"
+                  checked={affiliateIsPrimary}
+                  onChange={(e) => setAffiliateIsPrimary(e.target.checked)}
+                  className="h-4 w-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                />
+                <label htmlFor="affiliateIsPrimary" className="text-slate-700 font-medium cursor-pointer">
+                  Set as primary organization affiliation
+                </label>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAffiliateOrgModal(false)}
+                  className="px-3.5 py-1.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={affiliateSubmitting || !affiliateOrgId}
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg"
+                >
+                  {affiliateSubmitting ? 'Affiliating...' : 'Affiliate Provider'}
                 </button>
               </div>
             </form>

@@ -133,12 +133,20 @@ export default function ProvidersListPage() {
             Manage provider demographics, clinical specialties, and organizational rosters
           </p>
         </div>
-        <Link
-          href="/providers/new"
-          className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition"
-        >
-          <span className="mr-1.5 font-bold">+</span> Onboard Provider
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/providers/import"
+            className="inline-flex items-center justify-center px-4 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg shadow-sm transition"
+          >
+            Bulk Import CSV
+          </Link>
+          <Link
+            href="/providers/new"
+            className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition"
+          >
+            <span className="mr-1.5 font-bold">+</span> Onboard Provider
+          </Link>
+        </div>
       </div>
 
       {/* Filter and Search Bar */}

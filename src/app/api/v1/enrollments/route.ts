@@ -16,6 +16,7 @@ export const GET = withErrorHandler(async (req: Request) => {
   const search = searchParams.get('search') || undefined;
   const providerId = searchParams.get('providerId') || undefined;
   const payerId = searchParams.get('payerId') || undefined;
+  const organizationId = searchParams.get('organizationId') || undefined;
   const status = searchParams.get('status') || undefined;
   const enrollmentType = (searchParams.get('enrollmentType') as EnrollmentFilterOptions['enrollmentType']) || 'all';
   const assignedToId = searchParams.get('assignedToId') || undefined;
@@ -31,6 +32,7 @@ export const GET = withErrorHandler(async (req: Request) => {
     search,
     providerId,
     payerId,
+    organizationId,
     status,
     enrollmentType,
     assignedToId,
@@ -79,6 +81,20 @@ export const POST = withErrorHandler(async (req: Request) => {
     }
   }
 
+  // Verify organization if provided
+  let groupNpiToUse = data.groupNpi || null;
+  if (data.organizationId) {
+    const org = await prisma.organization.findUnique({
+      where: { id: data.organizationId },
+    });
+    if (!org) {
+      throw ApiError.notFound('Organization not found.');
+    }
+    if (!groupNpiToUse && org.npiNumber) {
+      groupNpiToUse = org.npiNumber;
+    }
+  }
+
   // Create enrollment in transaction with initial status history
   const enrollment = await prisma.$transaction(async (tx) => {
     const enr = await tx.payerEnrollment.create({
@@ -86,12 +102,13 @@ export const POST = withErrorHandler(async (req: Request) => {
         providerId: data.providerId,
         payerId: data.payerId,
         locationId: data.locationId || null,
+        organizationId: data.organizationId || null,
         enrollmentType: data.enrollmentType,
         applicationType: data.applicationType,
         status: data.status,
         providerPayerId: data.providerPayerId || null,
         groupNumber: data.groupNumber || null,
-        groupNpi: data.groupNpi || null,
+        groupNpi: groupNpiToUse,
         submittedDate: data.submittedDate ? new Date(data.submittedDate) : null,
         effectiveDate: data.effectiveDate ? new Date(data.effectiveDate) : null,
         terminationDate: data.terminationDate ? new Date(data.terminationDate) : null,
@@ -109,6 +126,7 @@ export const POST = withErrorHandler(async (req: Request) => {
         provider: true,
         payer: true,
         location: true,
+        organization: true,
       },
     });
 

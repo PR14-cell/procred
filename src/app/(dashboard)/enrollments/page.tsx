@@ -398,6 +398,12 @@ export default function EnrollmentWorkQueuePage() {
         </div>
         <div className="flex items-center space-x-2">
           <Link
+            href="/enrollments/bulk"
+            className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-sm transition"
+          >
+            ⚡ Bulk Enroll
+          </Link>
+          <Link
             href="/admin/payers"
             className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-sm transition"
           >

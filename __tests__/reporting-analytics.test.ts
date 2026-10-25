@@ -385,11 +385,20 @@ describe('Phase 7: Reporting, Analytics & Dashboards Module', () => {
     });
 
     it('rejects viewer from accessing workload endpoint via direct HTTP request (403 Forbidden)', async () => {
+      const sessToken = crypto.randomUUID();
+      await prisma.userSession.create({
+        data: {
+          userId: viewerUser.id,
+          sessionToken: sessToken,
+          expiresAt: new Date(Date.now() + 3600000),
+        },
+      });
+
       const viewerToken = await createSessionToken({
         userId: viewerUser.id,
         email: viewerUser.email,
         role: UserRole.viewer,
-        sessionId: 'sess-viewer-01',
+        sessionId: sessToken,
       });
 
       const req = new Request('http://localhost/api/v1/reports/workload', {
@@ -403,11 +412,20 @@ describe('Phase 7: Reporting, Analytics & Dashboards Module', () => {
     });
 
     it('rejects viewer from exporting CSV via direct HTTP request (403 Forbidden)', async () => {
+      const sessToken = crypto.randomUUID();
+      await prisma.userSession.create({
+        data: {
+          userId: viewerUser.id,
+          sessionToken: sessToken,
+          expiresAt: new Date(Date.now() + 3600000),
+        },
+      });
+
       const viewerToken = await createSessionToken({
         userId: viewerUser.id,
         email: viewerUser.email,
         role: UserRole.viewer,
-        sessionId: 'sess-viewer-02',
+        sessionId: sessToken,
       });
 
       const req = new Request('http://localhost/api/v1/reports/export?type=credentials', {
@@ -419,11 +437,20 @@ describe('Phase 7: Reporting, Analytics & Dashboards Module', () => {
     });
 
     it('allows admin to export CSV via direct HTTP request (200 OK)', async () => {
+      const sessToken = crypto.randomUUID();
+      await prisma.userSession.create({
+        data: {
+          userId: adminUser.id,
+          sessionToken: sessToken,
+          expiresAt: new Date(Date.now() + 3600000),
+        },
+      });
+
       const adminToken = await createSessionToken({
         userId: adminUser.id,
         email: adminUser.email,
         role: UserRole.admin,
-        sessionId: 'sess-admin-01',
+        sessionId: sessToken,
       });
 
       const req = new Request('http://localhost/api/v1/reports/export?type=credentials', {

@@ -25,11 +25,11 @@ describe('Auth & Session Foundation', () => {
     expect(isInvalid).toBe(false);
   });
 
-  it('should generate 10 unique backup codes matching standard format XXXX-XXXX', () => {
+  it('should generate 10 unique backup codes matching standard format with >= 80 bits entropy', () => {
     const codes = generateBackupCodes(10);
     expect(codes).toHaveLength(10);
     codes.forEach((code) => {
-      expect(code).toMatch(/^[A-F0-9]{4}-[A-F0-9]{4}$/);
+      expect(code).toMatch(/^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/);
     });
     const uniqueSet = new Set(codes);
     expect(uniqueSet.size).toBe(10);

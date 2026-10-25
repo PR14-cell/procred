@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import NotificationBell from '@/components/NotificationBell';
 
 export default function DashboardLayout({
   children,
@@ -11,6 +12,37 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+
+  const [user, setUser] = useState<{
+    id: string;
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    role: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadUser() {
+      try {
+        const res = await fetch('/api/v1/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.user) {
+            setUser(data.user);
+          }
+        } else if (res.status === 401) {
+          router.push('/login');
+        }
+      } catch {
+        router.push('/login');
+      }
+    }
+    loadUser();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -21,23 +53,38 @@ export default function DashboardLayout({
     router.push('/login');
   };
 
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+
   interface NavItem {
     label: string;
     href: string;
     icon: string;
     badge?: string;
+    adminOnly?: boolean;
   }
 
   const navItems: NavItem[] = [
     { label: 'Dashboard', href: '/dashboard', icon: '📊' },
     { label: 'Providers', href: '/providers', icon: '👤' },
+    { label: 'Groups & Orgs', href: '/organizations', icon: '🏢' },
     { label: 'Credentials & Expirations', href: '/credentials', icon: '🛡️' },
     { label: 'Payer Enrollments', href: '/enrollments', icon: '📝' },
     { label: 'Payers Directory', href: '/admin/payers', icon: '🏛️' },
     { label: 'Documents', href: '/documents', icon: '📄' },
     { label: 'Tasks', href: '/tasks', icon: '✅' },
-    { label: 'Users & Roles', href: '/admin/users', icon: '⚙️' },
+    { label: 'Notifications', href: '/notifications', icon: '🔔' },
+    { label: 'Background Jobs', href: '/admin/jobs', icon: '⚡', adminOnly: true },
+    { label: 'User Management', href: '/admin/users', icon: '👥', adminOnly: true },
+    { label: 'Backup & Restore', href: '/admin/backup', icon: '💾', adminOnly: true },
+    { label: 'My Profile', href: '/profile', icon: '👤' },
   ];
+
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.adminOnly && !isAdmin) {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -54,7 +101,7 @@ export default function DashboardLayout({
         </div>
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = pathname === item.href;
             return (
               <Link
@@ -82,12 +129,16 @@ export default function DashboardLayout({
 
         <div className="p-4 border-t border-slate-800">
           <div className="flex items-center justify-between mb-3">
-            <div className="text-xs">
-              <div className="text-white font-medium">Logged in</div>
-              <div className="text-slate-400">Admin Account</div>
+            <div className="text-xs truncate max-w-[140px]">
+              <div className="text-white font-medium truncate">
+                {user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email : 'Logged in'}
+              </div>
+              <div className="text-slate-400 capitalize truncate">
+                {user ? user.role.replace('_', ' ') : 'Session active'}
+              </div>
             </div>
-            <span className="inline-block px-2 py-0.5 text-[10px] font-semibold bg-emerald-900/50 text-emerald-400 border border-emerald-700/50 rounded">
-              Phase 2 Active
+            <span className="inline-block px-2 py-0.5 text-[10px] font-semibold bg-emerald-900/50 text-emerald-400 border border-emerald-700/50 rounded capitalize">
+              {user?.role ? user.role.replace('_', ' ') : 'Active'}
             </span>
           </div>
           <button
@@ -111,6 +162,7 @@ export default function DashboardLayout({
           </div>
 
           <div className="flex items-center space-x-4">
+            <NotificationBell />
             <div className="flex items-center space-x-2 text-xs text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
               <span>Self-Hosted & Isolated</span>

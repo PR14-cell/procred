@@ -71,6 +71,7 @@ export const createEnrollmentSchema = z.object({
   providerId: z.string().uuid('Invalid provider ID'),
   payerId: z.string().uuid('Invalid payer ID'),
   locationId: z.string().uuid('Invalid location ID').optional().nullable(),
+  organizationId: z.string().uuid('Invalid organization ID').optional().nullable(),
   enrollmentType: EnrollmentTypeEnum.default('individual'),
   applicationType: ApplicationTypeEnum.default('initial'),
   status: EnrollmentStatusEnum.default('not_started'),
@@ -94,17 +95,18 @@ export const createEnrollmentSchema = z.object({
   notes: z.string().optional().nullable(),
   missingItems: z.array(missingItemSchema).default([]),
 }).refine((data) => {
-  if (data.enrollmentType === 'group' && !data.groupNpi && !data.groupNumber) {
+  if (data.enrollmentType === 'group' && !data.groupNpi && !data.groupNumber && !data.organizationId) {
     return false;
   }
   return true;
 }, {
-  message: 'Group enrollment requires at least Group NPI or Group Number',
+  message: 'Group enrollment requires at least Group NPI, Group Number, or Organization reference',
   path: ['groupNpi'],
 });
 
 export const updateEnrollmentSchema = z.object({
   locationId: z.string().uuid().optional().nullable(),
+  organizationId: z.string().uuid().optional().nullable(),
   enrollmentType: EnrollmentTypeEnum.optional(),
   applicationType: ApplicationTypeEnum.optional(),
   status: EnrollmentStatusEnum.optional(),

@@ -1,17 +1,42 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function LoginPage() {
+type LoginStep = 'password' | 'mfa_verify' | 'mfa_enroll';
+
+interface MfaSetupData {
+  secret: string;
+  qrCodeDataUrl: string;
+  backupCodes: string[];
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [step, setStep] = useState<LoginStep>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mfaCode, setMfaCode] = useState('');
-  const [mfaUserId, setMfaUserId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Mandatory Enrollment Data
+  const [setupData, setSetupData] = useState<MfaSetupData | null>(null);
+  const [copiedCodes, setCopiedCodes] = useState(false);
+
+  const callbackUrl = searchParams.get('callbackUrl') || '/dashboard';
+  const isExpired = searchParams.get('expired') === 'true';
+
+  useEffect(() => {
+    if (isExpired) {
+      setError('Your session has expired. Please sign in again.');
+    }
+  }, [isExpired]);
+
+  // Handle Initial Password Submission
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -29,12 +54,22 @@ export default function LoginPage() {
         throw new Error(data.message || 'Login failed.');
       }
 
-      if (data.mfaRequired) {
-        setMfaUserId(data.userId);
+      setUserId(data.userId);
+
+      if (data.authStage === 'mfa_enrollment_required') {
+        // Fetch QR code & recovery codes for mandatory enrollment
+        await loadMfaSetup();
+        setStep('mfa_enroll');
         return;
       }
 
-      router.push('/dashboard');
+      if (data.authStage === 'mfa_pending' || data.mfaRequired) {
+        setStep('mfa_verify');
+        return;
+      }
+
+      // Password alone NEVER grants access - fallback to mfa_verify if unspecified
+      setStep('mfa_verify');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Login failed.');
     } finally {
@@ -42,7 +77,23 @@ export default function LoginPage() {
     }
   };
 
-  const handleMfaSubmit = async (e: React.FormEvent) => {
+  // Fetch QR Code and Secret for initial enrollment
+  const loadMfaSetup = async () => {
+    try {
+      const res = await fetch('/api/v1/auth/mfa');
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.message || 'Failed to initialize MFA setup.');
+      }
+      const data: MfaSetupData = await res.json();
+      setSetupData(data);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not prepare MFA enrollment.');
+    }
+  };
+
+  // Handle MFA Verification Challenge
+  const handleMfaVerifySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
@@ -51,7 +102,9 @@ export default function LoginPage() {
       const res = await fetch('/api/v1/auth/mfa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: mfaUserId, token: mfaCode }),
+        body: JSON.stringify({
+          token: mfaCode.trim(),
+        }),
       });
 
       const data = await res.json();
@@ -59,9 +112,37 @@ export default function LoginPage() {
         throw new Error(data.message || 'MFA verification failed.');
       }
 
-      router.push('/dashboard');
+      router.push(callbackUrl);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'MFA verification failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle Mandatory MFA Initial Enrollment
+  const handleMfaEnrollSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const res = await fetch('/api/v1/auth/mfa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: mfaCode.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'MFA enrollment verification failed.');
+      }
+
+      router.push(callbackUrl);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'MFA enrollment failed.');
     } finally {
       setLoading(false);
     }
@@ -84,16 +165,18 @@ export default function LoginPage() {
           </div>
         )}
 
-        {!mfaUserId ? (
+        {/* STEP 1: PASSWORD AUTHENTICATION */}
+        {step === 'password' && (
           <form onSubmit={handlePasswordSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Email address</label>
               <input
                 type="email"
                 required
+                autoFocus
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@example.com"
+                placeholder="name@organization.com"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
               />
             </div>
@@ -105,7 +188,7 @@ export default function LoginPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="••••••••••••"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
               />
             </div>
@@ -115,17 +198,20 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm transition shadow-sm disabled:opacity-50"
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? 'Verifying credentials...' : 'Continue'}
             </button>
           </form>
-        ) : (
-          <form onSubmit={handleMfaSubmit} className="space-y-4">
+        )}
+
+        {/* STEP 2: RETURNING USER MFA VERIFICATION */}
+        {step === 'mfa_verify' && (
+          <form onSubmit={handleMfaVerifySubmit} className="space-y-4">
             <div className="p-3 bg-blue-50 text-blue-800 rounded-lg text-xs leading-relaxed">
-              Two-Factor Authentication is enabled on your account. Please enter the 6-digit code from your authenticator app or a backup code.
+              Two-Factor Authentication is enforced. Please enter the 6-digit code from your authenticator app, or a single-use recovery code.
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">MFA Verification Code</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Verification Code</label>
               <input
                 type="text"
                 required
@@ -142,23 +228,127 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm transition shadow-sm disabled:opacity-50"
             >
-              {loading ? 'Verifying...' : 'Verify Code'}
+              {loading ? 'Verifying token...' : 'Verify & Access'}
             </button>
 
             <button
               type="button"
-              onClick={() => setMfaUserId(null)}
+              onClick={() => {
+                setStep('password');
+                setMfaCode('');
+              }}
               className="w-full py-2 text-slate-500 text-xs hover:text-slate-700"
             >
-              ← Back to login
+              ← Back to sign-in
+            </button>
+          </form>
+        )}
+
+        {/* STEP 3: MANDATORY INITIAL MFA ENROLLMENT */}
+        {step === 'mfa_enroll' && (
+          <form onSubmit={handleMfaEnrollSubmit} className="space-y-4">
+            <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg text-xs leading-relaxed font-medium">
+              Mandatory Two-Factor Authentication Setup. You must configure an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, etc.) to access your account.
+            </div>
+
+            {setupData ? (
+              <div className="space-y-4">
+                <div className="flex flex-col items-center justify-center p-3 bg-slate-50 rounded-lg border border-slate-200">
+                  <img
+                    src={setupData.qrCodeDataUrl}
+                    alt="Scan MFA QR Code"
+                    className="w-44 h-44 rounded-md border border-slate-200 shadow-inner"
+                  />
+                  <p className="mt-2 text-xs text-slate-500 text-center">
+                    Scan with your authenticator app or enter secret manually:
+                  </p>
+                  <code className="mt-1 px-2 py-0.5 bg-slate-200 text-slate-800 text-xs rounded font-mono select-all">
+                    {setupData.secret}
+                  </code>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Single-Use Recovery Codes (Save these now):
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5 p-2 bg-slate-50 border border-slate-200 rounded font-mono text-xs text-slate-700 select-all">
+                    {setupData.backupCodes.map((code, idx) => (
+                      <span key={idx} className="px-1 py-0.5 bg-white border border-slate-200 rounded text-center">
+                        {code}
+                      </span>
+                    ))}
+                  </div>
+                  <label className="mt-2 flex items-start gap-2 cursor-pointer text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={copiedCodes}
+                      onChange={(e) => setCopiedCodes(e.target.checked)}
+                      className="mt-0.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                    />
+                    <span>I have securely written down or saved these 10 recovery codes.</span>
+                  </label>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Enter 6-digit code from authenticator:
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value)}
+                    placeholder="123456"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-center tracking-widest font-mono font-bold"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading || !copiedCodes}
+                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg text-sm transition shadow-sm disabled:opacity-50"
+                >
+                  {loading ? 'Activating MFA...' : 'Activate MFA & Access Platform'}
+                </button>
+              </div>
+            ) : (
+              <div className="text-center py-6 text-sm text-slate-500">
+                Generating secure authenticator setup...
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setStep('password');
+                setMfaCode('');
+              }}
+              className="w-full py-2 text-slate-500 text-xs hover:text-slate-700"
+            >
+              ← Back to sign-in
             </button>
           </form>
         )}
 
         <div className="mt-6 pt-4 border-t border-slate-200 text-center text-xs text-slate-400">
-          Demo Admin: <span className="font-mono text-slate-600">admin@example.com</span> / <span className="font-mono text-slate-600">AdminSecret2026!</span>
+          HIPAA & NIST SP 800-63B Compliant Access Control
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-400">
+          Loading sign-in portal...
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

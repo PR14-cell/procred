@@ -3,9 +3,8 @@ import { prisma } from '@/lib/db/prisma';
 import { withErrorHandler, ApiError } from '@/lib/errors/api-error';
 import { requireAuth } from '@/lib/auth/server-auth';
 import { logAuditEvent } from '@/lib/audit/audit-logger';
-import { getDocumentById } from '@/lib/documents/document-service';
+import { getDocumentById, deleteDocument } from '@/lib/documents/document-service';
 import { updateDocumentMetadataSchema } from '@/lib/validation/document';
-import { deleteFromS3 } from '@/lib/storage/s3';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,41 +77,16 @@ export const PATCH = withErrorHandler(async (req: Request, context?: RouteContex
   });
 });
 
-// DELETE /api/v1/documents/[id] - Delete document and all its versions
+// DELETE /api/v1/documents/[id] - Delete document and all its versions (Admin only)
 export const DELETE = withErrorHandler(async (req: Request, context?: RouteContext) => {
-  const session = await requireAuth(req, 'documents:write');
+  const session = await requireAuth(req, 'documents:delete');
   const documentId = context!.params.id;
 
-  const existing = await prisma.document.findUnique({
-    where: { id: documentId },
-    include: { versions: true },
-  });
-
-  if (!existing) {
-    throw ApiError.notFound('Document not found.');
-  }
-
-  // Delete versions from S3
-  for (const v of existing.versions) {
-    await deleteFromS3({ bucket: v.s3Bucket, key: v.s3Key });
-  }
-
-  // Delete from DB (cascades to versions)
-  await prisma.document.delete({
-    where: { id: documentId },
-  });
-
-  await logAuditEvent({
-    userId: session.userId,
-    userEmail: session.email,
-    action: 'DOCUMENT_DELETED',
-    entityType: 'document',
-    entityId: documentId,
-    changes: {
-      title: existing.title,
-      documentType: existing.documentType,
-      versionCount: existing.versions.length,
-    },
+  await deleteDocument({
+    documentId,
+    actorId: session.userId,
+    actorEmail: session.email,
+    actorRole: session.role,
   });
 
   return NextResponse.json({

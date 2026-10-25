@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
+import { ApiError } from '@/lib/errors/api-error';
 import {
   S3_BUCKETS,
   validateDocumentPayload,
@@ -280,7 +281,7 @@ export async function createDocumentWithVersion(params: {
   // 1. Validate file payload
   const validation = validateDocumentPayload(fileBuffer, fileName, mimeType);
   if (!validation.isValid) {
-    throw new Error(validation.error || 'Invalid file upload.');
+    throw ApiError.badRequest(validation.error || 'Invalid file upload.');
   }
 
   // 2. Resolve bucket and safe S3 storage key
@@ -400,7 +401,7 @@ export async function addDocumentVersion(params: {
   // 1. Validate file payload
   const validation = validateDocumentPayload(fileBuffer, fileName, mimeType);
   if (!validation.isValid) {
-    throw new Error(validation.error || 'Invalid file upload.');
+    throw ApiError.badRequest(validation.error || 'Invalid file upload.');
   }
 
   const latestVersionNumber = existing.versions[0]?.versionNumber || 0;
@@ -724,4 +725,75 @@ export async function scanDocumentExpirationsAndPendingReview() {
     expiredTasksCreated,
     reviewTasksCreated,
   };
+}
+
+/**
+ * Delete a document and all its versions from S3, clean up associated tasks, and log an immutable audit event.
+ * Only authorized administrators are permitted to perform this operation.
+ */
+export async function deleteDocument(params: {
+  documentId: string;
+  actorId: string;
+  actorEmail?: string;
+  actorRole?: string;
+}) {
+  const { documentId, actorId, actorEmail, actorRole } = params;
+
+  const existing = await prisma.document.findUnique({
+    where: { id: documentId },
+    include: {
+      versions: true,
+      provider: {
+        select: { id: true, firstName: true, lastName: true, npiNumber: true },
+      },
+    },
+  });
+
+  if (!existing) {
+    throw ApiError.notFound('Document not found.');
+  }
+
+  // 1. Delete all version objects from S3 / MinIO
+  for (const v of existing.versions) {
+    await deleteFromS3({ bucket: v.s3Bucket, key: v.s3Key });
+  }
+
+  // 2. Clean up any open scanner or operational tasks associated with this document
+  await prisma.task.deleteMany({
+    where: { entityType: 'document', entityId: documentId },
+  });
+
+  // 3. Delete document record (cascades to document_versions)
+  await prisma.document.delete({
+    where: { id: documentId },
+  });
+
+  // 4. Record immutable audit log
+  await logAuditEvent({
+    userId: actorId,
+    userEmail: actorEmail,
+    action: 'DOCUMENT_DELETED',
+    entityType: 'document',
+    entityId: documentId,
+    changes: {
+      title: existing.title,
+      documentType: existing.documentType,
+      providerId: existing.providerId,
+      providerName: existing.provider
+        ? `${existing.provider.firstName} ${existing.provider.lastName}`
+        : null,
+      versionCount: existing.versions.length,
+      versions: existing.versions.map((v) => ({
+        versionNumber: v.versionNumber,
+        fileName: v.fileName,
+        fileSize: Number(v.fileSize),
+        s3Key: v.s3Key,
+        checksumSha256: v.checksumSha256,
+      })),
+      deletedAt: new Date().toISOString(),
+      deletedByRole: actorRole || 'admin',
+    },
+  });
+
+  return { success: true };
 }

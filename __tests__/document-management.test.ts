@@ -7,6 +7,7 @@ import {
   getDocuments,
   getDocumentById,
   scanDocumentExpirationsAndPendingReview,
+  deleteDocument,
 } from '../src/lib/documents/document-service';
 import {
   sanitizeFileName,
@@ -26,6 +27,8 @@ import { hasPermission } from '../src/lib/auth/rbac';
 describe('Phase 5: Document Management & Verification Module', () => {
   let testUserId: string;
   let testViewerUserId: string;
+  let testAdminUserId: string;
+  let testEnrollmentUserId: string;
   let testProviderId: string;
   let testPayerId: string;
   let testEnrollmentId: string;
@@ -67,6 +70,34 @@ describe('Phase 5: Document Management & Verification Module', () => {
       },
     });
     testViewerUserId = viewerUser.id;
+
+    // 2b. Create admin user
+    const adminUser = await prisma.user.upsert({
+      where: { email: 'phase5_admin@example.com' },
+      update: {},
+      create: {
+        email: 'phase5_admin@example.com',
+        passwordHash: '$2a$10$abcdefghijklmnopqrstuv',
+        firstName: 'Adam',
+        lastName: 'DocAdmin',
+        role: 'admin',
+      },
+    });
+    testAdminUserId = adminUser.id;
+
+    // 2c. Create enrollment specialist user
+    const enrollUser = await prisma.user.upsert({
+      where: { email: 'phase5_enrollment@example.com' },
+      update: {},
+      create: {
+        email: 'phase5_enrollment@example.com',
+        passwordHash: '$2a$10$abcdefghijklmnopqrstuv',
+        firstName: 'Emma',
+        lastName: 'DocEnrollment',
+        role: 'enrollment_specialist',
+      },
+    });
+    testEnrollmentUserId = enrollUser.id;
 
     // 3. Create test provider
     await prisma.provider.deleteMany({ where: { npiNumber: '9955443322' } });
@@ -139,7 +170,7 @@ describe('Phase 5: Document Management & Verification Module', () => {
       where: { entityType: 'document', entityId: { in: createdDocumentIds } },
     });
     await prisma.notification.deleteMany({
-      where: { userId: { in: [testUserId, testViewerUserId] } },
+      where: { userId: { in: [testUserId, testViewerUserId, testAdminUserId, testEnrollmentUserId] } },
     });
     await prisma.payerEnrollment.deleteMany({ where: { id: testEnrollmentId } });
     await prisma.payer.deleteMany({ where: { id: testPayerId } });
@@ -716,6 +747,307 @@ describe('Phase 5: Document Management & Verification Module', () => {
         expirationDate: '2025-01-01', // Invalid: expiration before issue date
       });
       expect(invalidUpdate.success).toBe(false);
+    });
+  });
+
+  // ==========================================
+  // 13. Upload Validation & Boundary Enforcement
+  // ==========================================
+  describe('13. Upload Validation & Boundary Enforcement', () => {
+    it('should reject upload when document category (documentType) is missing or invalid', () => {
+      // Missing category
+      const missingCategory = createDocumentSchema.safeParse({
+        title: 'Valid Document Title',
+        fileName: 'doc.pdf',
+        mimeType: 'application/pdf',
+        fileBase64: 'dGVzdA==',
+      });
+      expect(missingCategory.success).toBe(false);
+
+      // Unsupported category
+      const invalidCategory = createDocumentSchema.safeParse({
+        documentType: 'unsupported_custom_type',
+        title: 'Valid Document Title',
+        fileName: 'doc.pdf',
+        mimeType: 'application/pdf',
+        fileBase64: 'dGVzdA==',
+      });
+      expect(invalidCategory.success).toBe(false);
+    });
+
+    it('should reject blank or whitespace-only titles', () => {
+      // Empty title
+      const emptyTitle = createDocumentSchema.safeParse({
+        documentType: 'state_license',
+        title: '',
+        fileName: 'doc.pdf',
+        mimeType: 'application/pdf',
+        fileBase64: 'dGVzdA==',
+      });
+      expect(emptyTitle.success).toBe(false);
+
+      // Whitespace-only title
+      const whitespaceTitle = createDocumentSchema.safeParse({
+        documentType: 'state_license',
+        title: '   ',
+        fileName: 'doc.pdf',
+        mimeType: 'application/pdf',
+        fileBase64: 'dGVzdA==',
+      });
+      expect(whitespaceTitle.success).toBe(false);
+
+      // Single character title
+      const shortTitle = createDocumentSchema.safeParse({
+        documentType: 'state_license',
+        title: 'A',
+        fileName: 'doc.pdf',
+        mimeType: 'application/pdf',
+        fileBase64: 'dGVzdA==',
+      });
+      expect(shortTitle.success).toBe(false);
+    });
+
+    it('should reject missing file or empty fileBase64 data', () => {
+      // Empty fileBase64
+      const emptyFile = createDocumentSchema.safeParse({
+        documentType: 'state_license',
+        title: 'Valid License Title',
+        fileName: 'doc.pdf',
+        mimeType: 'application/pdf',
+        fileBase64: '',
+      });
+      expect(emptyFile.success).toBe(false);
+
+      // Missing fileName
+      const missingName = createDocumentSchema.safeParse({
+        documentType: 'state_license',
+        title: 'Valid License Title',
+        mimeType: 'application/pdf',
+        fileBase64: 'dGVzdA==',
+      });
+      expect(missingName.success).toBe(false);
+    });
+
+    it('should reject disallowed MIME types and enforce 25 MB limit', () => {
+      // Disallowed MIME types
+      const textMime = createDocumentSchema.safeParse({
+        documentType: 'state_license',
+        title: 'Valid License Title',
+        fileName: 'notes.txt',
+        mimeType: 'text/plain',
+        fileBase64: 'dGVzdA==',
+      });
+      expect(textMime.success).toBe(false);
+
+      const zipMime = createDocumentSchema.safeParse({
+        documentType: 'state_license',
+        title: 'Valid License Title',
+        fileName: 'archive.zip',
+        mimeType: 'application/zip',
+        fileBase64: 'dGVzdA==',
+      });
+      expect(zipMime.success).toBe(false);
+
+      // Allowed MIME types
+      for (const validMime of ['application/pdf', 'image/jpeg', 'image/png']) {
+        const ok = createDocumentSchema.safeParse({
+          documentType: 'state_license',
+          title: 'Valid License Title',
+          fileName: 'doc.pdf',
+          mimeType: validMime,
+          fileBase64: 'dGVzdA==',
+        });
+        expect(ok.success).toBe(true);
+      }
+
+      // Server payload validation enforces 25MB limit
+      const oversized = Buffer.alloc(26 * 1024 * 1024);
+      const sizeValidation = validateDocumentPayload(oversized, 'big.pdf', 'application/pdf');
+      expect(sizeValidation.isValid).toBe(false);
+      expect(sizeValidation.error).toContain('exceeds the 25MB limit');
+    });
+
+    it('should reject invalid date range where expiration date is earlier than issue date', () => {
+      const invalidDates = createDocumentSchema.safeParse({
+        documentType: 'state_license',
+        title: 'Valid License Title',
+        issueDate: '2026-06-01',
+        expirationDate: '2025-06-01', // Before issue date!
+        fileName: 'doc.pdf',
+        mimeType: 'application/pdf',
+        fileBase64: 'dGVzdA==',
+      });
+      expect(invalidDates.success).toBe(false);
+
+      const validDates = createDocumentSchema.safeParse({
+        documentType: 'state_license',
+        title: 'Valid License Title',
+        issueDate: '2025-06-01',
+        expirationDate: '2026-06-01',
+        fileName: 'doc.pdf',
+        mimeType: 'application/pdf',
+        fileBase64: 'dGVzdA==',
+      });
+      expect(validDates.success).toBe(true);
+    });
+
+    it('should allow optional provider association and persist document metadata without provider', async () => {
+      const generalDoc = await createDocumentWithVersion({
+        entityType: 'general',
+        entityId: '00000000-0000-0000-0000-000000000001',
+        providerId: null,
+        documentType: 'w9',
+        title: 'Clinic Corporate W9 Form 2026',
+        description: 'Facility-level tax documentation not tied to individual provider.',
+        issueDate: '2026-01-01',
+        expirationDate: '2026-12-31',
+        fileBuffer: dummyPdfBuffer,
+        fileName: 'corporate_w9_2026.pdf',
+        mimeType: 'application/pdf',
+        uploadedById: testUserId,
+      });
+
+      createdDocumentIds.push(generalDoc.id);
+
+      expect(generalDoc.id).toBeDefined();
+      expect(generalDoc.providerId).toBeNull();
+      expect(generalDoc.entityType).toBe('general');
+      expect(generalDoc.title).toBe('Clinic Corporate W9 Form 2026');
+      expect(generalDoc.currentVersion?.versionNumber).toBe(1);
+    });
+  });
+
+  // ==========================================
+  // 14. Administrator-Only Document Deletion & RBAC
+  // ==========================================
+  describe('14. Administrator-Only Document Deletion & RBAC', () => {
+    let docToDeleteId: string;
+    let v1Key: string;
+    let v2Key: string;
+    let v1Bucket: string;
+    let v2Bucket: string;
+    let taskId: string;
+
+    beforeAll(async () => {
+      // Create a document with Version 1
+      const doc = await createDocumentWithVersion({
+        entityType: 'provider',
+        entityId: testProviderId,
+        providerId: testProviderId,
+        documentType: 'cme_certificate',
+        title: 'CME Trauma Life Support Certificate',
+        fileBuffer: dummyPdfBuffer,
+        fileName: 'cme_v1.pdf',
+        mimeType: 'application/pdf',
+        uploadedById: testUserId,
+      });
+      docToDeleteId = doc.id;
+      v1Key = doc.currentVersion!.s3Key;
+      v1Bucket = doc.currentVersion!.s3Bucket;
+
+      // Add Version 2
+      const v2Result = await addDocumentVersion({
+        documentId: docToDeleteId,
+        fileBuffer: dummyJpgBuffer,
+        fileName: 'cme_v2_updated.jpg',
+        mimeType: 'image/jpeg',
+        uploadedById: testUserId,
+        notes: 'Updated certificate with credit hours.',
+      });
+      v2Key = v2Result.version.s3Key;
+      v2Bucket = v2Result.version.s3Bucket;
+
+      // Create an associated task
+      const task = await prisma.task.create({
+        data: {
+          title: `Review CME Certificate: ${doc.title}`,
+          entityType: 'document',
+          entityId: docToDeleteId,
+          priority: 'medium',
+          status: 'pending',
+          dueDate: new Date(),
+        },
+      });
+      taskId = task.id;
+    });
+
+    it('should enforce RBAC permissions restricting document deletion to administrator roles only', () => {
+      // Authorized roles
+      expect(hasPermission('super_admin', 'documents:delete')).toBe(true);
+      expect(hasPermission('admin', 'documents:delete')).toBe(true);
+
+      // Unauthorized roles
+      expect(hasPermission('credentialing_specialist', 'documents:delete')).toBe(false);
+      expect(hasPermission('enrollment_specialist', 'documents:delete')).toBe(false);
+      expect(hasPermission('viewer', 'documents:delete')).toBe(false);
+    });
+
+    it('should delete document, all its version files from S3, and related tasks when an authorized admin deletes', async () => {
+      // Confirm files exist in S3 before deletion
+      const s3v1Before = await downloadFromS3({ bucket: v1Bucket, key: v1Key });
+      expect(s3v1Before.body).toBeDefined();
+
+      const s3v2Before = await downloadFromS3({ bucket: v2Bucket, key: v2Key });
+      expect(s3v2Before.body).toBeDefined();
+
+      // Execute authorized admin deletion
+      const result = await deleteDocument({
+        documentId: docToDeleteId,
+        actorId: testAdminUserId,
+        actorEmail: 'phase5_admin@example.com',
+        actorRole: 'admin',
+      });
+
+      expect(result.success).toBe(true);
+
+      // Verify document record is removed from DB
+      const dbDoc = await prisma.document.findUnique({ where: { id: docToDeleteId } });
+      expect(dbDoc).toBeNull();
+
+      // Verify all versions cascaded in DB
+      const dbVersions = await prisma.documentVersion.findMany({ where: { documentId: docToDeleteId } });
+      expect(dbVersions.length).toBe(0);
+
+      // Verify associated task is cleaned up
+      const dbTask = await prisma.task.findUnique({ where: { id: taskId } });
+      expect(dbTask).toBeNull();
+
+      // Verify S3 files are deleted
+      await expect(downloadFromS3({ bucket: v1Bucket, key: v1Key })).rejects.toThrow();
+      await expect(downloadFromS3({ bucket: v2Bucket, key: v2Key })).rejects.toThrow();
+    });
+  });
+
+  // ==========================================
+  // 15. Audit Record Creation & History Preservation
+  // ==========================================
+  describe('15. Audit Record Creation & History Preservation', () => {
+    it('should create DOCUMENT_DELETED audit log with actor attribution while preserving prior audit events', async () => {
+      // Fetch all audit logs for the deleted document
+      const auditLogs = await prisma.auditLog.findMany({
+        where: { entityType: 'document' },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      // Find the DOCUMENT_DELETED log
+      const deleteLog = auditLogs.find((l) => l.action === 'DOCUMENT_DELETED');
+      expect(deleteLog).toBeDefined();
+      expect(deleteLog?.userId).toBe(testAdminUserId);
+      expect(deleteLog?.userEmail).toBe('phase5_admin@example.com');
+
+      const changes = deleteLog?.changes as Record<string, unknown>;
+      expect(changes.title).toBe('CME Trauma Life Support Certificate');
+      expect(changes.documentType).toBe('cme_certificate');
+      expect(changes.versionCount).toBe(2);
+      expect(changes.deletedByRole).toBe('admin');
+      expect(Array.isArray(changes.versions)).toBe(true);
+
+      // Historical audit events (DOCUMENT_UPLOADED, DOCUMENT_VERSION_CREATED) must still exist
+      const uploadLogs = auditLogs.filter((l) => l.action === 'DOCUMENT_UPLOADED');
+      expect(uploadLogs.length).toBeGreaterThanOrEqual(1);
+
+      const versionLogs = auditLogs.filter((l) => l.action === 'DOCUMENT_VERSION_CREATED');
+      expect(versionLogs.length).toBeGreaterThanOrEqual(1);
     });
   });
 });

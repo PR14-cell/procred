@@ -56,6 +56,66 @@ export const createProviderSchema = z.object({
       })
     )
     .optional(),
+  payerIds: z.array(z.string().uuid('Invalid payer ID')).optional(),
+  payerEnrollments: z
+    .array(
+      z.object({
+        payerId: z.string().uuid('Invalid payer ID'),
+        enrollmentType: z.enum(['individual', 'group']).default('individual').optional(),
+        applicationType: z.string().default('initial').optional(),
+        status: z
+          .enum(['not_started', 'in_progress', 'submitted', 'approved', 'rejected', 'expired'])
+          .default('not_started')
+          .optional(),
+        notes: z.string().trim().max(1000).optional().nullable(),
+        locationId: z.string().uuid('Invalid location ID').optional().nullable(),
+      })
+    )
+    .optional(),
+  organizationAffiliation: z
+    .object({
+      mode: z.enum(['none', 'existing', 'new']).default('none'),
+      organizationId: z.string().uuid().optional().nullable(),
+      isPrimary: z.boolean().default(true),
+      employmentType: z.string().optional().nullable(),
+      newOrganization: z
+        .object({
+          name: z.string().trim().min(1, 'Group name is required').max(255),
+          dbaName: z.string().trim().max(255).optional().nullable().or(z.literal('')),
+          npiNumber: z
+            .string()
+            .trim()
+            .regex(npiRegex, 'Group NPI must be exactly 10 digits')
+            .optional()
+            .nullable()
+            .or(z.literal('')),
+          taxId: z
+            .string()
+            .trim()
+            .regex(/^(?:\d{2}-\d{7}|\d{9})$/, 'Tax ID must be 9 digits or XX-XXXXXXX')
+            .optional()
+            .nullable()
+            .or(z.literal('')),
+          organizationType: z.string().default('medical_group').optional(),
+          address1: z.string().trim().min(1, 'Street address is required').max(255),
+          city: z.string().trim().min(1, 'City is required').max(100),
+          state: z.string().trim().length(2, 'State must be 2 characters').toUpperCase(),
+          zipCode: z.string().trim().min(5).max(10),
+          phone: z.string().trim().max(20).optional().nullable().or(z.literal('')),
+          email: z.string().trim().email().optional().nullable().or(z.literal('')),
+        })
+        .optional(),
+    })
+    .optional(),
+  organizationIds: z
+    .array(
+      z.object({
+        organizationId: z.string().uuid(),
+        isPrimary: z.boolean().default(false),
+        employmentType: z.string().optional().nullable(),
+      })
+    )
+    .optional(),
 });
 
 export const updateProviderSchema = createProviderSchema.partial().extend({

@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth/server-auth';
 import { updateProviderSchema } from '@/lib/validation/provider';
 import { encrypt, decrypt } from '@/lib/encryption/aes';
 import { logAuditEvent } from '@/lib/audit/audit-logger';
+import { hasPermission } from '@/lib/auth/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,11 @@ export const GET = withErrorHandler(async (req: Request, context?: RouteContext)
   }
 
   const { searchParams } = new URL(req.url);
-  const revealSsn = searchParams.get('revealSsn') === 'true';
+  const wantRevealSsn = searchParams.get('revealSsn') === 'true';
+  if (wantRevealSsn && !hasPermission(session.role, 'pii:reveal')) {
+    throw ApiError.forbidden("Forbidden: 'pii:reveal' permission required to reveal full SSN.");
+  }
+  const revealSsn = wantRevealSsn;
 
   const provider = await prisma.provider.findUnique({
     where: { id: providerId },
@@ -33,6 +38,10 @@ export const GET = withErrorHandler(async (req: Request, context?: RouteContext)
       },
       locations: {
         include: { location: true },
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      },
+      organizations: {
+        include: { organization: true },
         orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
       },
       stateLicenses: {
@@ -106,14 +115,15 @@ export const GET = withErrorHandler(async (req: Request, context?: RouteContext)
   if (provider.ssnEncrypted) {
     if (revealSsn) {
       try {
-        ssnDisplay = decrypt(Buffer.from(provider.ssnEncrypted));
-        // Audit sensitive data access
+        ssnDisplay = decrypt(Buffer.from(provider.ssnEncrypted), 'provider.ssn');
+        // Audit sensitive PII access
         await logAuditEvent({
           userId: session.userId,
           userEmail: session.email,
-          action: 'view_sensitive_ssn',
+          action: 'pii_reveal',
           entityType: 'provider',
           entityId: provider.id,
+          metadata: { field: 'ssn' },
         });
       } catch (err) {
         console.error('Failed to decrypt SSN:', err);
@@ -122,7 +132,7 @@ export const GET = withErrorHandler(async (req: Request, context?: RouteContext)
     } else {
       // Masked SSN format
       try {
-        const fullSsn = decrypt(Buffer.from(provider.ssnEncrypted));
+        const fullSsn = decrypt(Buffer.from(provider.ssnEncrypted), 'provider.ssn');
         const last4 = fullSsn.replace(/\D/g, '').slice(-4);
         ssnDisplay = `***-**-${last4 || '****'}`;
       } catch {
@@ -220,7 +230,7 @@ export const PATCH = withErrorHandler(async (req: Request, context?: RouteContex
 
   if (parsed.ssn !== undefined) {
     if (parsed.ssn) {
-      dataToUpdate.ssnEncrypted = encrypt(parsed.ssn);
+      dataToUpdate.ssnEncrypted = encrypt(parsed.ssn, 'provider.ssn');
       changes['ssn'] = { old: '[ENCRYPTED]', new: '[UPDATED_ENCRYPTED]' };
     } else {
       dataToUpdate.ssnEncrypted = null;

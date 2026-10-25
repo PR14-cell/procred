@@ -51,8 +51,17 @@ interface SummaryCounts {
   expiredCount: number;
 }
 
+interface CurrentUser {
+  id: string;
+  email: string;
+  role: string;
+  firstName?: string;
+  lastName?: string;
+}
+
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [summaryCounts, setSummaryCounts] = useState<SummaryCounts>({
     totalCount: 0,
     pendingReviewCount: 0,
@@ -74,7 +83,9 @@ export default function DocumentsPage() {
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<DocumentItem | null>(null);
+  const [docToDelete, setDocToDelete] = useState<DocumentItem | null>(null);
 
   // Upload Form state
   const [providersList, setProvidersList] = useState<{ id: string; firstName: string; lastName: string; npiNumber: string | null }[]>([]);
@@ -88,7 +99,16 @@ export default function DocumentsPage() {
   });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{
+    title?: string;
+    documentType?: string;
+    file?: string;
+    issueDate?: string;
+    expirationDate?: string;
+  }>({});
 
   // Version Form state
   const [versionFile, setVersionFile] = useState<File | null>(null);
@@ -98,6 +118,18 @@ export default function DocumentsPage() {
   const [verifyStatus, setVerifyStatus] = useState<'verified' | 'rejected'>('verified');
   const [verificationNotes, setVerificationNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
+
+  // Fetch current user identity & role
+  useEffect(() => {
+    fetch('/api/v1/auth/me')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.user) setCurrentUser(d.user);
+      })
+      .catch((e) => console.warn('Could not load current user profile:', e));
+  }, []);
+
+  const isAdmin = currentUser?.role === 'super_admin' || currentUser?.role === 'admin';
 
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
@@ -139,13 +171,51 @@ export default function DocumentsPage() {
 
   const handleFileUpload = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
+    setFormError(null);
+    const errors: typeof fieldErrors = {};
+
+    // 1. Title validation (required, no whitespace-only, min 2 chars)
+    const trimmedTitle = uploadFormData.title.trim();
+    if (!trimmedTitle) {
+      errors.title = 'Document title is required.';
+    } else if (trimmedTitle.length < 2) {
+      errors.title = 'Document title must be at least 2 characters.';
+    }
+
+    // 2. Category validation (required)
+    if (!uploadFormData.documentType) {
+      errors.documentType = 'Document category is required.';
+    }
+
+    // 3. File validation (required, <= 25MB, supported MIME)
     if (!uploadFile) {
-      setFormError('Please select a file to upload.');
+      errors.file = 'Please select a file to upload.';
+    } else {
+      if (uploadFile.size > 25 * 1024 * 1024) {
+        errors.file = `File size (${(uploadFile.size / (1024 * 1024)).toFixed(2)} MB) exceeds 25 MB limit.`;
+      }
+      const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+      if (!allowedTypes.includes(uploadFile.type)) {
+        errors.file = 'Only PDF, JPEG, and PNG files are supported.';
+      }
+    }
+
+    // 4. Date range validation
+    if (uploadFormData.issueDate && uploadFormData.expirationDate) {
+      if (new Date(uploadFormData.expirationDate) < new Date(uploadFormData.issueDate)) {
+        errors.expirationDate = 'Expiration date must be on or after issue date.';
+      }
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
 
+    setFieldErrors({});
     setIsSubmitting(true);
-    setFormError(null);
 
     try {
       const reader = new FileReader();
@@ -155,16 +225,14 @@ export default function DocumentsPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            entityType: uploadFormData.providerId ? 'provider' : 'credential',
-            entityId: uploadFormData.providerId || providersList[0]?.id || '00000000-0000-0000-0000-000000000000',
-            providerId: uploadFormData.providerId || null,
+            providerId: uploadFormData.providerId ? uploadFormData.providerId : null,
             documentType: uploadFormData.documentType,
-            title: uploadFormData.title || uploadFile.name,
-            description: uploadFormData.description || null,
+            title: trimmedTitle,
+            description: uploadFormData.description.trim() || null,
             issueDate: uploadFormData.issueDate || null,
             expirationDate: uploadFormData.expirationDate || null,
-            fileName: uploadFile.name,
-            mimeType: uploadFile.type || 'application/pdf',
+            fileName: uploadFile!.name,
+            mimeType: uploadFile!.type || 'application/pdf',
             fileBase64: base64Data,
           }),
         });
@@ -172,6 +240,7 @@ export default function DocumentsPage() {
         if (res.ok) {
           setShowUploadModal(false);
           setUploadFile(null);
+          setFieldErrors({});
           setUploadFormData({
             providerId: '',
             documentType: 'state_license',
@@ -183,11 +252,20 @@ export default function DocumentsPage() {
           fetchDocuments();
         } else {
           const errData = await res.json();
+          if (errData.details && typeof errData.details === 'object') {
+            const serverFieldErrors: typeof fieldErrors = {};
+            for (const [key, val] of Object.entries(errData.details)) {
+              if (Array.isArray(val) && val.length > 0) {
+                serverFieldErrors[key as keyof typeof fieldErrors] = val[0] as string;
+              }
+            }
+            setFieldErrors(serverFieldErrors);
+          }
           setFormError(errData.message || 'Upload failed.');
         }
         setIsSubmitting(false);
       };
-      reader.readAsDataURL(uploadFile);
+      reader.readAsDataURL(uploadFile!);
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Upload failed');
       setIsSubmitting(false);
@@ -196,7 +274,7 @@ export default function DocumentsPage() {
 
   const handleAddVersion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedDoc || !versionFile) return;
+    if (!selectedDoc || !versionFile || isSubmitting) return;
 
     setIsSubmitting(true);
     setFormError(null);
@@ -212,7 +290,7 @@ export default function DocumentsPage() {
             fileName: versionFile.name,
             mimeType: versionFile.type || 'application/pdf',
             fileBase64: base64Data,
-            notes: versionNotes || null,
+            notes: versionNotes.trim() || null,
           }),
         });
 
@@ -236,7 +314,7 @@ export default function DocumentsPage() {
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedDoc) return;
+    if (!selectedDoc || isSubmitting) return;
 
     if (verifyStatus === 'rejected' && (!rejectionReason || rejectionReason.trim().length < 3)) {
       setFormError('Rejection reason of at least 3 characters is required.');
@@ -252,8 +330,8 @@ export default function DocumentsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status: verifyStatus,
-          verificationNotes: verificationNotes || null,
-          rejectionReason: verifyStatus === 'rejected' ? rejectionReason : null,
+          verificationNotes: verificationNotes.trim() || null,
+          rejectionReason: verifyStatus === 'rejected' ? rejectionReason.trim() : null,
         }),
       });
 
@@ -270,6 +348,31 @@ export default function DocumentsPage() {
       setFormError(err instanceof Error ? err.message : 'Verification failed');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteDocument = async () => {
+    if (!docToDelete || isDeleting) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const res = await fetch(`/api/v1/documents/${docToDelete.id}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        setShowDeleteModal(false);
+        setDocToDelete(null);
+        fetchDocuments();
+      } else {
+        const errData = await res.json();
+        setDeleteError(errData.message || 'Failed to delete document.');
+      }
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : 'Deletion failed');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -330,6 +433,7 @@ export default function DocumentsPage() {
           <button
             onClick={() => {
               setFormError(null);
+              setFieldErrors({});
               setShowUploadModal(true);
             }}
             className="px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition"
@@ -416,7 +520,7 @@ export default function DocumentsPage() {
             <option value="w9">W-9 Form</option>
             <option value="identity_proof">Identity / Passport</option>
             <option value="cme_certificate">CME Certificate</option>
-            <option value="other">Other</option>
+            <option value="other">Other Credential</option>
           </select>
 
           <select
@@ -495,7 +599,9 @@ export default function DocumentsPage() {
                             )}
                           </div>
                         ) : (
-                          <span className="text-xs text-slate-400 capitalize">{doc.entityType.replace(/_/g, ' ')} Record</span>
+                          <span className="text-xs text-slate-400 capitalize">
+                            {doc.entityType === 'general' ? 'General Record (No Provider)' : `${doc.entityType.replace(/_/g, ' ')} Record`}
+                          </span>
                         )}
                       </td>
                       <td className="px-5 py-4">
@@ -581,6 +687,19 @@ export default function DocumentsPage() {
                           >
                             History ({doc.versions?.length || 1})
                           </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => {
+                                setDocToDelete(doc);
+                                setDeleteError(null);
+                                setShowDeleteModal(true);
+                              }}
+                              className="px-2.5 py-1 text-xs font-semibold rounded bg-rose-50 text-rose-700 border border-rose-300 hover:bg-rose-100 transition"
+                              title="Delete Document (Administrator only)"
+                            >
+                              Delete
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -621,7 +740,14 @@ export default function DocumentsPage() {
           <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-200 pb-4 mb-4">
               <h3 className="text-lg font-bold text-slate-900">Upload New Credentialing Document</h3>
-              <button onClick={() => setShowUploadModal(false)} className="text-slate-400 hover:text-slate-600 text-lg">✕</button>
+              <button
+                onClick={() => {
+                  if (!isSubmitting) setShowUploadModal(false);
+                }}
+                className="text-slate-400 hover:text-slate-600 text-lg"
+              >
+                ✕
+              </button>
             </div>
 
             {formError && (
@@ -632,13 +758,15 @@ export default function DocumentsPage() {
 
             <form onSubmit={handleFileUpload} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Associated Provider</label>
+                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                  Associated Provider <span className="text-slate-400 lowercase font-normal">(optional)</span>
+                </label>
                 <select
                   value={uploadFormData.providerId}
                   onChange={(e) => setUploadFormData({ ...uploadFormData, providerId: e.target.value })}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="">Select a provider...</option>
+                  <option value="">No Provider (General Organization Document)</option>
                   {providersList.map((p) => (
                     <option key={p.id} value={p.id}>
                       Dr. {p.firstName} {p.lastName} {p.npiNumber ? `(NPI: ${p.npiNumber})` : ''}
@@ -649,11 +777,20 @@ export default function DocumentsPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Document Category *</label>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                    Document Category <span className="text-rose-600">*</span>
+                  </label>
                   <select
                     value={uploadFormData.documentType}
-                    onChange={(e) => setUploadFormData({ ...uploadFormData, documentType: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                    onChange={(e) => {
+                      setUploadFormData({ ...uploadFormData, documentType: e.target.value });
+                      if (fieldErrors.documentType) {
+                        setFieldErrors({ ...fieldErrors, documentType: undefined });
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-sm rounded-lg border ${
+                      fieldErrors.documentType ? 'border-rose-400 bg-rose-50/50' : 'border-slate-300'
+                    } focus:ring-2 focus:ring-blue-500`}
                   >
                     <option value="state_license">State License</option>
                     <option value="dea_registration">DEA Registration</option>
@@ -667,17 +804,33 @@ export default function DocumentsPage() {
                     <option value="cme_certificate">CME Certificate</option>
                     <option value="other">Other Credential</option>
                   </select>
+                  {fieldErrors.documentType && (
+                    <p className="text-xs text-rose-600 mt-1">{fieldErrors.documentType}</p>
+                  )}
                 </div>
+
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Document Title *</label>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                    Document Title <span className="text-rose-600">*</span>
+                  </label>
                   <input
                     type="text"
                     required
                     placeholder="e.g. Texas Medical License 2026"
                     value={uploadFormData.title}
-                    onChange={(e) => setUploadFormData({ ...uploadFormData, title: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                    onChange={(e) => {
+                      setUploadFormData({ ...uploadFormData, title: e.target.value });
+                      if (fieldErrors.title) {
+                        setFieldErrors({ ...fieldErrors, title: undefined });
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-sm rounded-lg border ${
+                      fieldErrors.title ? 'border-rose-400 bg-rose-50/50' : 'border-slate-300'
+                    } focus:ring-2 focus:ring-blue-500`}
                   />
+                  {fieldErrors.title && (
+                    <p className="text-xs text-rose-600 mt-1">{fieldErrors.title}</p>
+                  )}
                 </div>
               </div>
 
@@ -687,18 +840,39 @@ export default function DocumentsPage() {
                   <input
                     type="date"
                     value={uploadFormData.issueDate}
-                    onChange={(e) => setUploadFormData({ ...uploadFormData, issueDate: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                    onChange={(e) => {
+                      setUploadFormData({ ...uploadFormData, issueDate: e.target.value });
+                      if (fieldErrors.issueDate || fieldErrors.expirationDate) {
+                        setFieldErrors({ ...fieldErrors, issueDate: undefined, expirationDate: undefined });
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-sm rounded-lg border ${
+                      fieldErrors.issueDate ? 'border-rose-400 bg-rose-50/50' : 'border-slate-300'
+                    } focus:ring-2 focus:ring-blue-500`}
                   />
+                  {fieldErrors.issueDate && (
+                    <p className="text-xs text-rose-600 mt-1">{fieldErrors.issueDate}</p>
+                  )}
                 </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Expiration Date</label>
                   <input
                     type="date"
                     value={uploadFormData.expirationDate}
-                    onChange={(e) => setUploadFormData({ ...uploadFormData, expirationDate: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                    onChange={(e) => {
+                      setUploadFormData({ ...uploadFormData, expirationDate: e.target.value });
+                      if (fieldErrors.expirationDate) {
+                        setFieldErrors({ ...fieldErrors, expirationDate: undefined });
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-sm rounded-lg border ${
+                      fieldErrors.expirationDate ? 'border-rose-400 bg-rose-50/50' : 'border-slate-300'
+                    } focus:ring-2 focus:ring-blue-500`}
                   />
+                  {fieldErrors.expirationDate && (
+                    <p className="text-xs text-rose-600 mt-1">{fieldErrors.expirationDate}</p>
+                  )}
                 </div>
               </div>
 
@@ -714,17 +888,24 @@ export default function DocumentsPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Document File (PDF, JPEG, PNG, max 25MB) *</label>
-                <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:border-blue-500 transition">
+                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                  Document File (PDF, JPEG, PNG, max 25MB) <span className="text-rose-600">*</span>
+                </label>
+                <div
+                  className={`border-2 border-dashed rounded-xl p-4 text-center transition ${
+                    fieldErrors.file ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300 hover:border-blue-500'
+                  }`}
+                >
                   <input
                     type="file"
                     required
                     accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
                     onChange={(e) => {
                       if (e.target.files && e.target.files[0]) {
-                        setUploadFile(e.target.files[0]);
-                        if (!uploadFormData.title) {
-                          setUploadFormData({ ...uploadFormData, title: e.target.files[0].name.replace(/\.[^/.]+$/, '') });
+                        const file = e.target.files[0];
+                        setUploadFile(file);
+                        if (fieldErrors.file) {
+                          setFieldErrors({ ...fieldErrors, file: undefined });
                         }
                       }
                     }}
@@ -736,20 +917,24 @@ export default function DocumentsPage() {
                     </div>
                   )}
                 </div>
+                {fieldErrors.file && (
+                  <p className="text-xs text-rose-600 mt-1">{fieldErrors.file}</p>
+                )}
               </div>
 
               <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
                 <button
                   type="button"
+                  disabled={isSubmitting}
                   onClick={() => setShowUploadModal(false)}
-                  className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
+                  className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-5 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="px-5 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition"
                 >
                   {isSubmitting ? 'Uploading to S3...' : 'Upload Document'}
                 </button>
@@ -768,7 +953,14 @@ export default function DocumentsPage() {
                 <h3 className="text-lg font-bold text-slate-900">Upload Revised Version</h3>
                 <p className="text-xs text-slate-500 mt-0.5">{selectedDoc.title}</p>
               </div>
-              <button onClick={() => setShowVersionModal(false)} className="text-slate-400 hover:text-slate-600 text-lg">✕</button>
+              <button
+                onClick={() => {
+                  if (!isSubmitting) setShowVersionModal(false);
+                }}
+                className="text-slate-400 hover:text-slate-600 text-lg"
+              >
+                ✕
+              </button>
             </div>
 
             {formError && (
@@ -811,8 +1003,9 @@ export default function DocumentsPage() {
               <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
                 <button
                   type="button"
+                  disabled={isSubmitting}
                   onClick={() => setShowVersionModal(false)}
-                  className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
+                  className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -838,7 +1031,14 @@ export default function DocumentsPage() {
                 <h3 className="text-lg font-bold text-slate-900">Review & Primary Source Verification</h3>
                 <p className="text-xs text-slate-500 mt-0.5">{selectedDoc.title}</p>
               </div>
-              <button onClick={() => setShowVerifyModal(false)} className="text-slate-400 hover:text-slate-600 text-lg">✕</button>
+              <button
+                onClick={() => {
+                  if (!isSubmitting) setShowVerifyModal(false);
+                }}
+                className="text-slate-400 hover:text-slate-600 text-lg"
+              >
+                ✕
+              </button>
             </div>
 
             {formError && (
@@ -931,8 +1131,9 @@ export default function DocumentsPage() {
               <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
                 <button
                   type="button"
+                  disabled={isSubmitting}
                   onClick={() => setShowVerifyModal(false)}
-                  className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
+                  className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -1020,6 +1221,71 @@ export default function DocumentsPage() {
                 className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Delete Confirmation Modal */}
+      {showDeleteModal && docToDelete && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-4">
+              <div className="flex items-center space-x-2 text-rose-700">
+                <span className="text-xl">⚠️</span>
+                <h3 className="text-lg font-bold text-slate-900">Confirm Document Deletion</h3>
+              </div>
+              <button
+                onClick={() => {
+                  if (!isDeleting) setShowDeleteModal(false);
+                }}
+                className="text-slate-400 hover:text-slate-600 text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            {deleteError && (
+              <div className="mb-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="space-y-3 text-sm text-slate-600 mb-6">
+              <p>
+                Are you sure you want to permanently delete this document and all associated version files from storage?
+              </p>
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+                <div><strong className="text-slate-800">Title:</strong> {docToDelete.title}</div>
+                <div><strong className="text-slate-800">Category:</strong> {docToDelete.documentType.replace(/_/g, ' ')}</div>
+                <div>
+                  <strong className="text-slate-800">Provider:</strong>{' '}
+                  {docToDelete.provider ? `Dr. ${docToDelete.provider.firstName} ${docToDelete.provider.lastName}` : 'General Record (No Provider)'}
+                </div>
+                <div><strong className="text-slate-800">Version Count:</strong> {docToDelete.versions?.length || 1}</div>
+              </div>
+              <p className="text-xs text-rose-600 font-medium">
+                This action is irreversible and will be logged in the immutable audit log.
+              </p>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-3 border-t border-slate-200">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setShowDeleteModal(false)}
+                className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleDeleteDocument}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 shadow-sm"
+              >
+                {isDeleting ? 'Deleting...' : 'Yes, Delete Document'}
               </button>
             </div>
           </div>
