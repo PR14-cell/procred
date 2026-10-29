@@ -545,29 +545,23 @@ export class OrganizationService {
       throw ApiError.notFound('Provider not found.');
     }
 
-    // 3. Check for existing affiliation
-    const existingAffiliation = await prisma.providerOrganization.findUnique({
-      where: {
-        providerId_organizationId: {
-          providerId: input.providerId,
-          organizationId,
-        },
-      },
-    });
-
-    // 4. Atomic transaction
+    // 3. Atomic transaction
     const affiliation = await prisma.$transaction(
       async (tx) => {
+        // Serialize concurrent modifications for the same provider to avoid deadlocks
+        await tx.$executeRaw`SELECT id FROM providers WHERE id = ${input.providerId}::uuid FOR UPDATE`;
+
         // If setting this as primary, clear any other primary affiliation for this provider
         if (input.isPrimary) {
           await tx.providerOrganization.updateMany({
             where: {
               providerId: input.providerId,
               isPrimary: true,
+              NOT: { organizationId },
             },
             data: { isPrimary: false },
           });
-        } else if (!existingAffiliation) {
+        } else {
           // If provider has no other affiliations yet, default this first one to primary
           const count = await tx.providerOrganization.count({
             where: { providerId: input.providerId },
@@ -577,47 +571,23 @@ export class OrganizationService {
           }
         }
 
-        if (existingAffiliation) {
-          const updated = await tx.providerOrganization.update({
-            where: {
-              providerId_organizationId: {
-                providerId: input.providerId,
-                organizationId,
-              },
+        const upserted = await tx.providerOrganization.upsert({
+          where: {
+            providerId_organizationId: {
+              providerId: input.providerId,
+              organizationId,
             },
-            data: {
-              isPrimary: input.isPrimary !== undefined ? input.isPrimary : existingAffiliation.isPrimary,
-              employmentType:
-                input.employmentType !== undefined ? input.employmentType : existingAffiliation.employmentType,
-              startDate: input.startDate ?? existingAffiliation.startDate,
-              endDate: input.endDate ?? existingAffiliation.endDate,
-            },
-            include: {
-              provider: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                  npiNumber: true,
-                },
-              },
-              organization: {
-                select: {
-                  id: true,
-                  name: true,
-                  npiNumber: true,
-                },
-              },
-            },
-          });
-          return updated;
-        }
-
-        const created = await tx.providerOrganization.create({
-          data: {
+          },
+          update: {
+            ...(input.isPrimary !== undefined ? { isPrimary: input.isPrimary } : {}),
+            ...(input.employmentType !== undefined ? { employmentType: input.employmentType } : {}),
+            ...(input.startDate !== undefined ? { startDate: input.startDate } : {}),
+            ...(input.endDate !== undefined ? { endDate: input.endDate } : {}),
+          },
+          create: {
             providerId: input.providerId,
             organizationId,
-            isPrimary: input.isPrimary,
+            isPrimary: input.isPrimary ?? false,
             employmentType: input.employmentType || null,
             startDate: input.startDate || null,
             endDate: input.endDate || null,
@@ -641,7 +611,7 @@ export class OrganizationService {
           },
         });
 
-        return created;
+        return upserted;
       },
       { maxWait: 10000, timeout: 15000 }
     );

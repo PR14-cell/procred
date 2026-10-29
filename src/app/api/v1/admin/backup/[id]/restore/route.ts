@@ -14,7 +14,7 @@ interface RouteContext {
 
 const restoreRequestSchema = z.object({
   confirmRestore: z.literal('RESTORE_CONFIRM', {
-    errorMap: () => ({ message: 'Exact confirmation "RESTORE_CONFIRM" is required.' }),
+    error: 'Exact confirmation "RESTORE_CONFIRM" is required.',
   }),
   createRecoveryPoint: z.boolean().default(true),
 });

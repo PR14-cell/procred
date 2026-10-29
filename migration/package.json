@@ -1,0 +1,8 @@
+{
+  "name": "provider-credentialing-migrations",
+  "version": "1.0.2",
+  "private": true,
+  "dependencies": {
+    "prisma": "5.22.0"
+  }
+}

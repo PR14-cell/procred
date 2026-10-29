@@ -127,14 +127,13 @@ export const updateProviderSchema = createProviderSchema.partial().extend({
 });
 
 export const addSpecialtySchema = z.object({
-  taxonomyCode: z.string().trim().min(1, 'Taxonomy code is required'),
+  taxonomyCode: z.string().trim().min(1, 'Taxonomy code is required').optional(),
+  specialtyName: z.string().trim().min(1, 'Specialty name is required').max(255).optional(),
   isPrimary: z.boolean().default(false),
-});
-
-export const linkLocationSchema = z.object({
-  locationId: z.string().uuid('Valid location UUID is required'),
-  isPrimary: z.boolean().default(false),
-});
+}).refine(
+  (value) => Boolean(value.taxonomyCode) !== Boolean(value.specialtyName),
+  { message: 'Provide either a taxonomy code or a custom specialty name.' }
+);
 
 export const createLocationSchema = z.object({
   name: z.string().trim().min(1, 'Location name is required').max(255),
@@ -147,3 +146,12 @@ export const createLocationSchema = z.object({
   fax: z.string().trim().max(20).optional().nullable(),
   isActive: z.boolean().default(true),
 });
+
+export const linkLocationSchema = z.object({
+  locationId: z.string().uuid('Valid location UUID is required').optional(),
+  newLocation: createLocationSchema.omit({ isActive: true }).optional(),
+  isPrimary: z.boolean().default(false),
+}).refine(
+  (value) => Boolean(value.locationId) !== Boolean(value.newLocation),
+  { message: 'Provide either an existing location ID or new location details.' }
+);

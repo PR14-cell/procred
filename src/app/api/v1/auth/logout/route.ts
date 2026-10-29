@@ -36,5 +36,6 @@ export const POST = withErrorHandler(async (req: Request) => {
 
   const response = NextResponse.json({ success: true, message: 'Logged out successfully.' });
   response.cookies.delete('session_token');
+  response.cookies.delete('mfa_preauth_token');
   return response;
 });

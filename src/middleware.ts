@@ -40,10 +40,24 @@ export async function middleware(request: NextRequest) {
   // Helper to add security headers to any response
   const applySecurityHeaders = (res: NextResponse) => {
     // Content-Security-Policy
-    res.headers.set(
-      'Content-Security-Policy',
-      "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self';"
-    );
+    // Note: Next.js 14 static pages require 'unsafe-inline' for hydration scripts and inline styles.
+    // A nonce-based policy is a later hardening that requires dynamic rendering.
+    // Do NOT include 'unsafe-eval' in production.
+    const s3Endpoint = process.env.S3_PUBLIC_ENDPOINT ? ` ${process.env.S3_PUBLIC_ENDPOINT}` : '';
+    const csp = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "font-src 'self' data:",
+      `connect-src 'self'${s3Endpoint}`,
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join('; ');
+
+    res.headers.set('Content-Security-Policy', csp);
     res.headers.set('X-Frame-Options', 'DENY');
     res.headers.set('X-Content-Type-Options', 'nosniff');
     res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -127,22 +141,16 @@ export async function middleware(request: NextRequest) {
 
   // If user is already on a public path (like /login or /setup)
   if (isPublicPath) {
-    if (sessionToken && pathname === '/login') {
-      try {
-        const { payload } = await jwtVerify(sessionToken, getJwtSecret(), { algorithms: ['HS256'] });
-        if (payload.authStage === 'authenticated') {
-          return applySecurityHeaders(NextResponse.redirect(new URL('/dashboard', request.url)));
-        }
-      } catch {
-        // Token invalid, allow /login
-      }
-    }
     return applySecurityHeaders(NextResponse.next());
   }
 
   // API routes handle their own structured JSON 401/403 responses via requireAuth
   if (pathname.startsWith('/api/')) {
     return applySecurityHeaders(NextResponse.next());
+  }
+
+  if (pathname === '/') {
+    return applySecurityHeaders(NextResponse.redirect(new URL('/login', request.url)));
   }
 
   // For all protected frontend pages (/dashboard, /providers, etc.)
@@ -190,10 +198,6 @@ export async function middleware(request: NextRequest) {
 
     if (payload.authStage !== 'authenticated') {
       return applySecurityHeaders(NextResponse.redirect(new URL('/login', request.url)));
-    }
-
-    if (pathname === '/') {
-      return applySecurityHeaders(NextResponse.redirect(new URL('/dashboard', request.url)));
     }
 
     return applySecurityHeaders(NextResponse.next());

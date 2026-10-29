@@ -26,6 +26,7 @@ export type Permission =
   | 'jobs:manage'
   | 'system:backup'
   | 'system:restore'
+  | 'system:reset'
   | 'pii:reveal';
 
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -55,6 +56,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'jobs:manage',
     'system:backup',
     'system:restore',
+    'system:reset',
     'pii:reveal',
   ],
   admin: [

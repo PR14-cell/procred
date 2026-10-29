@@ -249,7 +249,9 @@ export async function requireAuth(
  */
 export async function requirePreAuthSession(
   req: Request,
-  allowedStages: Array<'mfa_pending' | 'mfa_enrollment_required'> = ['mfa_pending', 'mfa_enrollment_required']
+  allowedStages: Array<
+    'mfa_pending' | 'mfa_enrollment_required' | 'mfa_enrollment_optional' | 'password_change_required'
+  > = ['mfa_pending', 'mfa_enrollment_required', 'mfa_enrollment_optional']
 ): Promise<UserSessionPayload> {
   const session = await getPreAuthSession(req);
   if (!session) {

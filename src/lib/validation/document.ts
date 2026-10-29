@@ -18,7 +18,7 @@ export const DocumentTypeEnum = z.enum(
     'other',
   ],
   {
-    errorMap: () => ({ message: 'Document category is required and must be a supported type' }),
+    error: 'Document category is required and must be a supported type',
   }
 );
 
@@ -60,10 +60,11 @@ export const createDocumentSchema = z
     entityId: z.string().uuid('Invalid entity ID').optional(),
     providerId: z
       .union([z.string().uuid('Invalid provider ID'), z.literal(''), z.null(), z.undefined()])
-      .transform((val) => (val === '' ? null : val)),
+      .transform((val) => (val === '' ? null : val))
+      .optional(),
     documentType: DocumentTypeEnum,
     title: z
-      .string({ required_error: 'Document title is required' })
+      .string({ error: 'Document title is required' })
       .trim()
       .min(1, 'Document title is required')
       .min(2, 'Document title must be at least 2 characters')
@@ -84,7 +85,8 @@ export const createDocumentSchema = z
           return !isNaN(d.getTime());
         },
         { message: 'Invalid issue date' }
-      ),
+      )
+      .optional(),
     expirationDate: z
       .union([
         z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expiration date must be in YYYY-MM-DD format'),
@@ -100,17 +102,18 @@ export const createDocumentSchema = z
           return !isNaN(d.getTime());
         },
         { message: 'Invalid expiration date' }
-      ),
+      )
+      .optional(),
     fileName: z
-      .string({ required_error: 'File name is required' })
+      .string({ error: 'File name is required' })
       .trim()
       .min(1, 'File name is required')
       .max(255, 'File name cannot exceed 255 characters'),
     mimeType: z.enum(ALLOWED_DOCUMENT_MIME_TYPES, {
-      errorMap: () => ({ message: 'File type must be PDF, JPEG, or PNG' }),
+      error: 'File type must be PDF, JPEG, or PNG',
     }),
     fileBase64: z
-      .string({ required_error: 'File data is required' })
+      .string({ error: 'File data is required' })
       .min(1, 'File data is required'),
   })
   .refine(
@@ -131,15 +134,15 @@ export type CreateDocumentInput = z.infer<typeof createDocumentSchema>;
 // 2. Add New Version to Existing Document
 export const addDocumentVersionSchema = z.object({
   fileName: z
-    .string({ required_error: 'File name is required' })
+    .string({ error: 'File name is required' })
     .trim()
     .min(1, 'File name is required')
     .max(255),
   mimeType: z.enum(ALLOWED_DOCUMENT_MIME_TYPES, {
-    errorMap: () => ({ message: 'File type must be PDF, JPEG, or PNG' }),
+    error: 'File type must be PDF, JPEG, or PNG',
   }),
   fileBase64: z
-    .string({ required_error: 'File data is required' })
+    .string({ error: 'File data is required' })
     .min(1, 'File data is required'),
   notes: z.string().trim().optional().nullable(),
 });

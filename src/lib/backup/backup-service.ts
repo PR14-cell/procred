@@ -10,6 +10,7 @@ import {
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
+import AdmZip from 'adm-zip';
 
 export interface BackupManifest {
   id: string;
@@ -318,6 +319,39 @@ export class BackupService {
             // Corrupt manifest
           }
         }
+      } else if (entry.isFile() && entry.name.endsWith('.zip')) {
+        const filePath = path.join(root, entry.name);
+        const stats = fs.statSync(filePath);
+        const backupId = entry.name.replace(/\.zip$/, '');
+        try {
+          const zip = new AdmZip(filePath);
+          const manifestEntry = zip.getEntry('manifest.json');
+          if (manifestEntry) {
+            const manifest: any = JSON.parse(manifestEntry.getData().toString('utf8'));
+            summaries.push({
+              id: manifest.backupId || backupId,
+              createdAt: manifest.createdAt || stats.mtime.toISOString(),
+              status: manifest.status || 'completed',
+              totalSizeBytes: stats.size,
+              databaseSizeBytes: manifest.database?.sizeBytes || 0,
+              documentsCount: manifest.documents?.count || 0,
+              documentsSizeBytes: manifest.documents?.sizeBytes || 0,
+              isVerified: true,
+            });
+            continue;
+          }
+        } catch {
+          // fallback
+        }
+        summaries.push({
+          id: backupId,
+          createdAt: stats.mtime.toISOString(),
+          status: 'completed',
+          totalSizeBytes: stats.size,
+          databaseSizeBytes: stats.size,
+          documentsCount: 0,
+          documentsSizeBytes: 0,
+        });
       } else if (entry.isFile() && entry.name.endsWith('.sql.gz')) {
         // Legacy backup file compatibility
         const stats = fs.statSync(path.join(root, entry.name));
@@ -342,7 +376,21 @@ export class BackupService {
    * Retrieves single backup manifest.
    */
   static async getBackup(backupId: string): Promise<BackupManifest | null> {
-    const manifestPath = path.join(getBackupsRoot(), backupId, 'manifest.json');
+    const root = getBackupsRoot();
+    const zipPath = path.join(root, `${backupId}.zip`);
+    if (fs.existsSync(zipPath)) {
+      try {
+        const zip = new AdmZip(zipPath);
+        const manifestEntry = zip.getEntry('manifest.json');
+        if (manifestEntry) {
+          return JSON.parse(manifestEntry.getData().toString('utf8')) as BackupManifest;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const manifestPath = path.join(root, backupId, 'manifest.json');
     if (!fs.existsSync(manifestPath)) {
       return null;
     }
@@ -437,7 +485,16 @@ export class BackupService {
    * Bundles backup directory into a .tar.gz archive for secure download.
    */
   static async getBackupArchiveBuffer(backupId: string): Promise<{ buffer: Buffer; fileName: string }> {
-    const backupDir = path.join(getBackupsRoot(), backupId);
+    const root = getBackupsRoot();
+    const zipPath = path.join(root, `${backupId}.zip`);
+    if (fs.existsSync(zipPath)) {
+      return {
+        buffer: fs.readFileSync(zipPath),
+        fileName: `${backupId}.zip`,
+      };
+    }
+
+    const backupDir = path.join(root, backupId);
     if (!fs.existsSync(backupDir)) {
       throw new Error(`Backup '${backupId}' not found.`);
     }

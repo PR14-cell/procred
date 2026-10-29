@@ -52,7 +52,16 @@ export type RouteHandler<T = unknown> = (
 export function withErrorHandler<T = unknown>(handler: RouteHandler<T>): RouteHandler<T> {
   return async (req: Request, context?: T) => {
     try {
-      return await handler(req, context);
+      let normalizedContext = context;
+      if (context && typeof context === 'object' && 'params' in context) {
+        const routeContext = context as { params?: unknown };
+        normalizedContext = {
+          ...context,
+          params: await routeContext.params,
+        } as T;
+      }
+
+      return await handler(req, normalizedContext);
     } catch (error: unknown) {
       // 1. Handled custom ApiError
       if (error instanceof ApiError) {

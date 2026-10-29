@@ -6,17 +6,16 @@ import { updateProviderSchema } from '@/lib/validation/provider';
 import { encrypt, decrypt } from '@/lib/encryption/aes';
 import { logAuditEvent } from '@/lib/audit/audit-logger';
 import { hasPermission } from '@/lib/auth/rbac';
+import { resolveRouteParamId, type RouteParamsContext } from '@/lib/http/route-params';
 
 export const dynamic = 'force-dynamic';
 
-interface RouteContext {
-  params: { id: string };
-}
+interface RouteContext extends RouteParamsContext {}
 
 // GET /api/v1/providers/[id] - Get Provider Profile
 export const GET = withErrorHandler(async (req: Request, context?: RouteContext) => {
   const session = await requireAuth(req, 'providers:read');
-  const providerId = context?.params.id;
+  const providerId = await resolveRouteParamId(req, context);
 
   if (!providerId) {
     throw ApiError.badRequest('Provider ID is required.');
@@ -158,7 +157,7 @@ export const GET = withErrorHandler(async (req: Request, context?: RouteContext)
 // PATCH /api/v1/providers/[id] - Update Provider
 export const PATCH = withErrorHandler(async (req: Request, context?: RouteContext) => {
   const session = await requireAuth(req, 'providers:write');
-  const providerId = context?.params.id;
+  const providerId = await resolveRouteParamId(req, context);
 
   if (!providerId) {
     throw ApiError.badRequest('Provider ID is required.');
@@ -271,7 +270,7 @@ export const PATCH = withErrorHandler(async (req: Request, context?: RouteContex
 // DELETE /api/v1/providers/[id] - Archive Provider
 export const DELETE = withErrorHandler(async (req: Request, context?: RouteContext) => {
   const session = await requireAuth(req, 'providers:write');
-  const providerId = context?.params.id;
+  const providerId = await resolveRouteParamId(req, context);
 
   if (!providerId) {
     throw ApiError.badRequest('Provider ID is required.');

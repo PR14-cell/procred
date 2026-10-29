@@ -406,8 +406,7 @@ export async function scanEnrollmentFollowUpsAndRevalidations() {
       where: {
         entityType: 'payer_enrollment',
         entityId: enr.id,
-        title: { startsWith: 'Follow up with' },
-        status: { in: ['pending', 'in_progress', 'open'] },
+        status: { notIn: ['completed', 'cancelled'] },
       },
     });
 
@@ -447,8 +446,7 @@ export async function scanEnrollmentFollowUpsAndRevalidations() {
       where: {
         entityType: 'payer_enrollment',
         entityId: enr.id,
-        title: { startsWith: 'Revalidation due for' },
-        status: { in: ['pending', 'in_progress', 'open'] },
+        status: { notIn: ['completed', 'cancelled'] },
       },
     });
 

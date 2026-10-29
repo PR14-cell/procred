@@ -1,0 +1,661 @@
+// prisma/schema.prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  super_admin
+  admin
+  credentialing_specialist
+  enrollment_specialist
+  viewer
+}
+
+model User {
+  id                         String    @id @default(uuid()) @db.Uuid
+  email                      String    @unique @db.VarChar(255)
+  passwordHash               String    @map("password_hash") @db.VarChar(255)
+  firstName                  String    @map("first_name") @db.VarChar(100)
+  lastName                   String    @map("last_name") @db.VarChar(100)
+  role                       UserRole  @default(viewer)
+  isActive                   Boolean   @default(true) @map("is_active")
+  mustChangePassword         Boolean   @default(false) @map("must_change_password")
+  mfaEnabled                 Boolean   @default(false) @map("mfa_enabled")
+  mfaEnrolledAt              DateTime? @map("mfa_enrolled_at") @db.Timestamptz()
+  totpSecretEncrypted        Bytes?    @map("totp_secret_encrypted")
+  mfaPendingSecretEncrypted   Bytes?    @map("mfa_pending_secret_encrypted")
+  mfaBackupCodesEncrypted    Bytes?    @map("mfa_backup_codes_encrypted")
+  failedLoginAttempts        Int       @default(0) @map("failed_login_attempts")
+  lockedUntil                DateTime? @map("locked_until") @db.Timestamptz()
+  lastTotpTimestamp          BigInt?   @map("last_totp_timestamp")
+  lastLoginAt                DateTime? @map("last_login_at") @db.Timestamptz()
+  createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt                  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  recoveryCodes              UserRecoveryCode[]
+  sessions                   UserSession[]
+  assignedEnrollments        PayerEnrollment[]       @relation("AssignedEnrollments")
+  createdEnrollments         PayerEnrollment[]       @relation("CreatedEnrollments")
+  statusHistoryChanges       EnrollmentStatusHistory[]
+  followUpsCreated           EnrollmentFollowUp[]
+  assignedTasks              Task[]                  @relation("AssignedTasks")
+  createdTasks               Task[]                  @relation("CreatedTasks")
+  completedTasks             Task[]                  @relation("CompletedTasks")
+  createdNotes               Note[]                  @relation("CreatedNotes")
+  updatedNotes               Note[]                  @relation("UpdatedNotes")
+  verifications              VerificationHistory[]
+  notifications              Notification[]
+  notificationPreference     NotificationPreference?
+  auditLogs                  AuditLog[]
+  uploadedDocuments          Document[]              @relation("UploadedDocuments")
+  uploadedVersions           DocumentVersion[]       @relation("UploadedVersions")
+  verifiedLicenses           StateLicense[]          @relation("VerifiedLicenses")
+  verifiedDea                DeaRegistration[]       @relation("VerifiedDea")
+  verifiedBoards             BoardCertification[]    @relation("VerifiedBoards")
+  verifiedMalpractice        MalpracticeInsurance[]  @relation("VerifiedMalpractice")
+  verifiedDocuments          Document[]              @relation("VerifiedDocuments")
+
+  @@map("users")
+}
+
+model UserSession {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  sessionToken String   @unique @map("session_token") @db.VarChar(500)
+  expiresAt    DateTime @map("expires_at") @db.Timestamptz()
+  ipAddress    String?  @map("ip_address") @db.VarChar(45)
+  userAgent    String?  @map("user_agent") @db.VarChar(500)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_sessions")
+}
+
+model UserRecoveryCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @map("code_hash") @db.VarChar(255)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz()
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_recovery_codes")
+}
+
+model SystemSetting {
+  key       String   @id @db.VarChar(100)
+  value     String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  @@map("system_settings")
+}
+
+model Provider {
+  id                   String    @id @default(uuid()) @db.Uuid
+  firstName            String    @map("first_name") @db.VarChar(100)
+  middleName           String?   @map("middle_name") @db.VarChar(100)
+  lastName             String    @map("last_name") @db.VarChar(100)
+  suffix               String?   @db.VarChar(20)
+  dateOfBirth          DateTime? @map("date_of_birth") @db.Date
+  ssnEncrypted         Bytes?    @map("ssn_encrypted")
+  gender               String?   @db.VarChar(20)
+  email                String?   @db.VarChar(255)
+  phone                String?   @db.VarChar(20)
+  npiNumber            String?   @unique @map("npi_number") @db.VarChar(10)
+  npiType              Int?      @map("npi_type") @db.SmallInt
+  npiEnumerationDate   DateTime? @map("npi_enumeration_date") @db.Date
+  primaryTaxonomy      String?   @map("primary_taxonomy") @db.VarChar(20)
+  taxonomyDescription  String?   @map("taxonomy_description") @db.VarChar(255)
+  caqhId               String?   @map("caqh_id") @db.VarChar(20)
+  status               String    @default("active") @db.VarChar(30)
+  credentialingStatus  String    @default("in_progress") @map("credentialing_status") @db.VarChar(30)
+  notes                String?
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  locations            ProviderLocation[]
+  specialties          ProviderSpecialty[]
+  stateLicenses        StateLicense[]
+  deaRegistrations     DeaRegistration[]
+  boardCertifications  BoardCertification[]
+  malpracticePolicies  MalpracticeInsurance[]
+  caqhProfile          CaqhProfile?
+  enrollments          PayerEnrollment[]
+  verificationHistory  VerificationHistory[]
+  documents            Document[]              @relation("ProviderDocuments")
+  tasks                Task[]                  @relation("ProviderTasks")
+  providerNotes        Note[]                  @relation("ProviderNotes")
+  organizations        ProviderOrganization[]
+
+  @@map("providers")
+}
+
+model Location {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String    @db.VarChar(255)
+  address1    String    @db.VarChar(255)
+  address2    String?   @db.VarChar(255)
+  city        String    @db.VarChar(100)
+  state       String    @db.VarChar(2)
+  zipCode     String    @map("zip_code") @db.VarChar(10)
+  phone       String?   @db.VarChar(20)
+  fax         String?   @db.VarChar(20)
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  providers   ProviderLocation[]
+  enrollments PayerEnrollment[]
+
+  @@map("locations")
+}
+
+model ProviderLocation {
+  id         String   @id @default(uuid()) @db.Uuid
+  providerId String   @map("provider_id") @db.Uuid
+  locationId String   @map("location_id") @db.Uuid
+  isPrimary  Boolean  @default(false) @map("is_primary")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, locationId])
+  @@map("provider_locations")
+}
+
+model ProviderSpecialty {
+  id           String   @id @default(uuid()) @db.Uuid
+  providerId   String   @map("provider_id") @db.Uuid
+  taxonomyCode String   @map("taxonomy_code") @db.VarChar(20)
+  isPrimary    Boolean  @default(false) @map("is_primary")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  provider     Provider     @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  taxonomy     TaxonomyCode @relation(fields: [taxonomyCode], references: [code])
+
+  @@unique([providerId, taxonomyCode])
+  @@map("provider_specialties")
+}
+
+model StateLicense {
+  id             String    @id @default(uuid()) @db.Uuid
+  providerId     String    @map("provider_id") @db.Uuid
+  state          String    @db.VarChar(2)
+  licenseNumber  String    @map("license_number") @db.VarChar(50)
+  licenseType    String?   @map("license_type") @db.VarChar(100)
+  status         String    @default("active") @db.VarChar(30)
+  issueDate      DateTime? @map("issue_date") @db.Date
+  expirationDate DateTime? @map("expiration_date") @db.Date
+  verified       Boolean   @default(false)
+  verifiedAt     DateTime? @map("verified_at") @db.Timestamptz()
+  verifiedById   String?   @map("verified_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider       Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  verifiedBy     User?     @relation("VerifiedLicenses", fields: [verifiedById], references: [id])
+
+  @@index([expirationDate])
+  @@index([providerId])
+  @@map("state_licenses")
+}
+
+model DeaRegistration {
+  id             String    @id @default(uuid()) @db.Uuid
+  providerId     String    @map("provider_id") @db.Uuid
+  deaNumber      String    @map("dea_number") @db.VarChar(20)
+  schedule       String?   @db.VarChar(50)
+  state          String?   @db.VarChar(2)
+  status         String    @default("active") @db.VarChar(30)
+  issueDate      DateTime? @map("issue_date") @db.Date
+  expirationDate DateTime? @map("expiration_date") @db.Date
+  verified       Boolean   @default(false)
+  verifiedAt     DateTime? @map("verified_at") @db.Timestamptz()
+  verifiedById   String?   @map("verified_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider       Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  verifiedBy     User?     @relation("VerifiedDea", fields: [verifiedById], references: [id])
+
+  @@index([expirationDate])
+  @@map("dea_registrations")
+}
+
+model BoardCertification {
+  id                  String    @id @default(uuid()) @db.Uuid
+  providerId          String    @map("provider_id") @db.Uuid
+  boardName           String    @map("board_name") @db.VarChar(255)
+  specialty           String    @db.VarChar(255)
+  certificationNumber String?   @map("certification_number") @db.VarChar(50)
+  status              String    @default("active") @db.VarChar(30)
+  initialCertDate     DateTime? @map("initial_cert_date") @db.Date
+  expirationDate      DateTime? @map("expiration_date") @db.Date
+  verified            Boolean   @default(false)
+  verifiedAt          DateTime? @map("verified_at") @db.Timestamptz()
+  verifiedById        String?   @map("verified_by") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider            Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  verifiedBy          User?     @relation("VerifiedBoards", fields: [verifiedById], references: [id])
+
+  @@map("board_certifications")
+}
+
+model MalpracticeInsurance {
+  id               String    @id @default(uuid()) @db.Uuid
+  providerId       String    @map("provider_id") @db.Uuid
+  carrierName      String    @map("carrier_name") @db.VarChar(255)
+  policyNumber     String?   @map("policy_number") @db.VarChar(100)
+  coverageType     String?   @map("coverage_type") @db.VarChar(50)
+  perClaimAmount   Decimal?  @map("per_claim_amount") @db.Decimal(12, 2)
+  aggregateAmount  Decimal?  @map("aggregate_amount") @db.Decimal(12, 2)
+  effectiveDate    DateTime? @map("effective_date") @db.Date
+  expirationDate   DateTime? @map("expiration_date") @db.Date
+  retroactiveDate  DateTime? @map("retroactive_date") @db.Date
+  status           String    @default("active") @db.VarChar(30)
+  verified         Boolean   @default(false)
+  verifiedAt       DateTime? @map("verified_at") @db.Timestamptz()
+  verifiedById     String?   @map("verified_by") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider         Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  verifiedBy       User?     @relation("VerifiedMalpractice", fields: [verifiedById], references: [id])
+
+  @@index([expirationDate])
+  @@map("malpractice_insurance")
+}
+
+model CaqhProfile {
+  id                      String    @id @default(uuid()) @db.Uuid
+  providerId              String    @unique @map("provider_id") @db.Uuid
+  caqhId                  String    @map("caqh_id") @db.VarChar(20)
+  username                String?   @db.VarChar(100)
+  passwordEncrypted       Bytes?    @map("password_encrypted")
+  lastAttestationDate     DateTime? @map("last_attestation_date") @db.Date
+  nextAttestationDate     DateTime? @map("next_attestation_date") @db.Date
+  attestationStatus       String    @default("current") @map("attestation_status") @db.VarChar(30)
+  reauthorizationDate     DateTime? @map("reauthorization_date") @db.Date
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider                Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([nextAttestationDate])
+  @@map("caqh_profiles")
+}
+
+model Payer {
+  id                   String    @id @default(uuid()) @db.Uuid
+  name                 String    @db.VarChar(255)
+  shortName            String?   @map("short_name") @db.VarChar(50)
+  payerType            String?   @map("payer_type") @db.VarChar(50)
+  state                String?   @db.VarChar(2)
+  website              String?   @db.VarChar(500)
+  phone                String?   @db.VarChar(20)
+  enrollmentPortalUrl  String?   @map("enrollment_portal_url") @db.VarChar(500)
+  requiredDocumentTypes String[] @map("required_document_types")
+  notes                String?
+  isActive             Boolean   @default(true) @map("is_active")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  enrollments          PayerEnrollment[]
+
+  @@map("payers")
+}
+
+model PayerEnrollment {
+  id                      String    @id @default(uuid()) @db.Uuid
+  providerId              String    @map("provider_id") @db.Uuid
+  payerId                 String    @map("payer_id") @db.Uuid
+  locationId              String?   @map("location_id") @db.Uuid
+  providerPayerId         String?   @map("provider_payer_id") @db.VarChar(50)
+  groupNumber             String?   @map("group_number") @db.VarChar(50)
+  groupNpi                String?   @map("group_npi") @db.VarChar(10)
+  organizationId          String?   @map("organization_id") @db.Uuid
+  enrollmentType          String    @default("individual") @map("enrollment_type") @db.VarChar(20)
+  applicationType         String    @default("initial") @map("application_type") @db.VarChar(50)
+  status                  String    @default("not_started") @db.VarChar(30)
+  submittedDate           DateTime? @map("submitted_date") @db.Date
+  effectiveDate           DateTime? @map("effective_date") @db.Date
+  terminationDate         DateTime? @map("termination_date") @db.Date
+  followUpDate            DateTime? @map("follow_up_date") @db.Date
+  lastFollowUpDate        DateTime? @map("last_follow_up_date") @db.Date
+  revalidationDate        DateTime? @map("revalidation_date") @db.Date
+  revalidationCycleMonths Int?      @map("revalidation_cycle_months")
+  trackingNumber          String?   @map("tracking_number") @db.VarChar(100)
+  assignedToId            String?   @map("assigned_to") @db.Uuid
+  createdById             String?   @map("created_by") @db.Uuid
+  notes                   String?
+  missingItems            Json?     @map("missing_items")
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider                Provider      @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  payer                   Payer         @relation(fields: [payerId], references: [id])
+  location                Location?     @relation(fields: [locationId], references: [id])
+  organization            Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  assignedTo              User?         @relation("AssignedEnrollments", fields: [assignedToId], references: [id])
+  createdBy               User?         @relation("CreatedEnrollments", fields: [createdById], references: [id])
+
+  statusHistory           EnrollmentStatusHistory[]
+  followUps               EnrollmentFollowUp[]
+
+  @@index([providerId])
+  @@index([payerId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([revalidationDate])
+  @@index([effectiveDate])
+  @@index([followUpDate])
+  @@map("payer_enrollments")
+}
+
+model EnrollmentStatusHistory {
+  id             String    @id @default(uuid()) @db.Uuid
+  enrollmentId   String    @map("enrollment_id") @db.Uuid
+  previousStatus String?   @map("previous_status") @db.VarChar(30)
+  newStatus      String    @map("new_status") @db.VarChar(30)
+  changedById    String?   @map("changed_by") @db.Uuid
+  notes          String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  enrollment     PayerEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  changedBy      User?           @relation(fields: [changedById], references: [id])
+
+  @@index([enrollmentId, createdAt])
+  @@map("enrollment_status_history")
+}
+
+model EnrollmentFollowUp {
+  id              String    @id @default(uuid()) @db.Uuid
+  enrollmentId    String    @map("enrollment_id") @db.Uuid
+  followUpDate    DateTime  @map("follow_up_date") @db.Date
+  contactMethod   String?   @map("contact_method") @db.VarChar(30)
+  contactPerson   String?   @map("contact_person") @db.VarChar(255)
+  referenceNumber String?   @map("reference_number") @db.VarChar(100)
+  outcome         String?   @db.VarChar(50)
+  notes           String?
+  createdById     String?   @map("created_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  enrollment      PayerEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  createdBy       User?           @relation(fields: [createdById], references: [id])
+
+  @@index([enrollmentId, createdAt])
+  @@map("enrollment_follow_ups")
+}
+
+model Document {
+  id                String    @id @default(uuid()) @db.Uuid
+  entityType        String    @map("entity_type") @db.VarChar(50)
+  entityId          String    @map("entity_id") @db.Uuid
+  providerId        String?   @map("provider_id") @db.Uuid
+  documentType      String    @map("document_type") @db.VarChar(100)
+  title             String    @db.VarChar(255)
+  description       String?
+  status            String    @default("pending_review") @db.VarChar(30)
+  currentVersionId  String?   @unique @map("current_version_id") @db.Uuid
+  issueDate         DateTime? @map("issue_date") @db.Date
+  expirationDate    DateTime? @map("expiration_date") @db.Date
+  uploadedById      String?   @map("uploaded_by") @db.Uuid
+  verifiedById      String?   @map("verified_by") @db.Uuid
+  verifiedAt        DateTime? @map("verified_at") @db.Timestamptz()
+  verificationNotes String?   @map("verification_notes")
+  rejectionReason   String?   @map("rejection_reason")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider          Provider? @relation("ProviderDocuments", fields: [providerId], references: [id], onDelete: Cascade)
+  uploadedBy        User?     @relation("UploadedDocuments", fields: [uploadedById], references: [id])
+  verifiedBy        User?     @relation("VerifiedDocuments", fields: [verifiedById], references: [id])
+  versions          DocumentVersion[] @relation("DocumentVersions")
+  currentVersion    DocumentVersion?  @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([providerId])
+  @@index([documentType])
+  @@index([status])
+  @@index([expirationDate])
+  @@map("documents")
+}
+
+model DocumentVersion {
+  id             String    @id @default(uuid()) @db.Uuid
+  documentId     String    @map("document_id") @db.Uuid
+  versionNumber  Int       @default(1) @map("version_number")
+  s3Bucket       String    @map("s3_bucket") @db.VarChar(100)
+  s3Key          String    @map("s3_key") @db.VarChar(500)
+  fileName       String    @map("file_name") @db.VarChar(255)
+  fileSize       BigInt    @map("file_size")
+  mimeType       String    @map("mime_type") @db.VarChar(100)
+  checksumSha256 String?   @map("checksum_sha256") @db.VarChar(64)
+  uploadedById   String?   @map("uploaded_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  document       Document  @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Cascade)
+  currentFor     Document? @relation("CurrentVersion")
+  uploadedBy     User?     @relation("UploadedVersions", fields: [uploadedById], references: [id])
+
+  @@unique([documentId, versionNumber])
+  @@map("document_versions")
+}
+
+model Task {
+  id              String    @id @default(uuid()) @db.Uuid
+  title           String    @db.VarChar(255)
+  description     String?
+  taskType        String    @default("general") @map("task_type") @db.VarChar(50)
+  entityType      String?   @map("entity_type") @db.VarChar(50)
+  entityId        String?   @map("entity_id") @db.Uuid
+  providerId      String?   @map("provider_id") @db.Uuid
+  assignedToId    String?   @map("assigned_to") @db.Uuid
+  createdById     String?   @map("created_by") @db.Uuid
+  completedById   String?   @map("completed_by") @db.Uuid
+  priority        String    @default("medium") @db.VarChar(20)
+  status          String    @default("pending") @db.VarChar(30)
+  dueDate         DateTime? @map("due_date") @db.Date
+  completedAt     DateTime? @map("completed_at") @db.Timestamptz()
+  completionNotes String?   @map("completion_notes")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider        Provider? @relation("ProviderTasks", fields: [providerId], references: [id], onDelete: Cascade)
+  assignedTo      User?     @relation("AssignedTasks", fields: [assignedToId], references: [id])
+  createdBy       User?     @relation("CreatedTasks", fields: [createdById], references: [id])
+  completedBy     User?     @relation("CompletedTasks", fields: [completedById], references: [id])
+
+  @@index([assignedToId, status])
+  @@index([dueDate, status])
+  @@index([providerId])
+  @@index([taskType])
+  @@index([priority])
+  @@index([status])
+  @@map("tasks")
+}
+
+model Note {
+  id          String   @id @default(uuid()) @db.Uuid
+  entityType  String   @map("entity_type") @db.VarChar(50)
+  entityId    String   @map("entity_id") @db.Uuid
+  providerId  String?  @map("provider_id") @db.Uuid
+  content     String
+  isPinned    Boolean  @default(false) @map("is_pinned")
+  createdById String?  @map("created_by") @db.Uuid
+  updatedById String?  @map("updated_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider    Provider? @relation("ProviderNotes", fields: [providerId], references: [id], onDelete: Cascade)
+  createdBy   User?    @relation("CreatedNotes", fields: [createdById], references: [id])
+  updatedBy   User?    @relation("UpdatedNotes", fields: [updatedById], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([providerId])
+  @@index([createdById])
+  @@index([isPinned])
+  @@map("notes")
+}
+
+model VerificationHistory {
+  id             String    @id @default(uuid()) @db.Uuid
+  entityType     String    @map("entity_type") @db.VarChar(50)
+  entityId       String    @map("entity_id") @db.Uuid
+  providerId     String    @map("provider_id") @db.Uuid
+  method         String    @db.VarChar(50)
+  source         String    @db.VarChar(255)
+  status         String    @db.VarChar(30)
+  verifiedDate   DateTime  @default(now()) @map("verified_date") @db.Date
+  expirationDate DateTime? @map("expiration_date") @db.Date
+  notes          String?
+  verifiedById   String?   @map("verified_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  provider       Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  verifiedBy     User?     @relation(fields: [verifiedById], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([providerId])
+  @@map("verification_history")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  userEmail   String?  @map("user_email") @db.VarChar(255)
+  action      String   @db.VarChar(50)
+  entityType  String   @map("entity_type") @db.VarChar(50)
+  entityId    String?  @map("entity_id") @db.Uuid
+  changes     Json?
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  type        String    @db.VarChar(50)
+  title       String    @db.VarChar(255)
+  message     String
+  entityType  String?   @map("entity_type") @db.VarChar(50)
+  entityId    String?   @map("entity_id") @db.Uuid
+  isRead      Boolean   @default(false) @map("is_read")
+  readAt      DateTime? @map("read_at") @db.Timestamptz()
+  emailSent   Boolean   @default(false) @map("email_sent")
+  emailSentAt DateTime? @map("email_sent_at") @db.Timestamptz()
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @unique @map("user_id") @db.Uuid
+  emailEnabled       Boolean  @default(true) @map("email_enabled")
+  expirationAlerts   Boolean  @default(true) @map("expiration_alerts")
+  revalidationAlerts Boolean  @default(true) @map("revalidation_alerts")
+  taskAlerts         Boolean  @default(true) @map("task_alerts")
+  missingDocAlerts   Boolean  @default(true) @map("missing_doc_alerts")
+  dailyDigest        Boolean  @default(true) @map("daily_digest")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+model TaxonomyCode {
+  code           String   @id @db.VarChar(20)
+  classification String   @db.VarChar(255)
+  specialization String?  @db.VarChar(255)
+  definition     String?
+  isActive       Boolean  @default(true) @map("is_active")
+
+  specialties    ProviderSpecialty[]
+
+  @@map("taxonomy_codes")
+}
+
+model CredentialExpirationRule {
+  id              String   @id @default(uuid()) @db.Uuid
+  credentialType  String   @unique @map("credential_type") @db.VarChar(50)
+  alertDaysBefore Int[]    @default([90, 60, 30, 14]) @map("alert_days_before")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  @@map("credential_expiration_rules")
+}
+
+model Organization {
+  id               String                 @id @default(uuid()) @db.Uuid
+  name             String                 @db.VarChar(255)
+  dbaName          String?                @map("dba_name") @db.VarChar(255)
+  npiNumber        String?                @unique @map("npi_number") @db.VarChar(10)
+  taxIdEncrypted   Bytes?                 @map("tax_id_encrypted")
+  taxIdLastFour    String?                @map("tax_id_last_four") @db.VarChar(4)
+  organizationType String                 @default("medical_group") @map("organization_type") @db.VarChar(50)
+  address1         String                 @db.VarChar(255)
+  address2         String?                @db.VarChar(255)
+  city             String                 @db.VarChar(100)
+  state            String                 @db.VarChar(2)
+  zipCode          String                 @map("zip_code") @db.VarChar(10)
+  phone            String?                @db.VarChar(20)
+  email            String?                @db.VarChar(255)
+  website          String?                @db.VarChar(255)
+  status           String                 @default("active") @db.VarChar(30)
+  notes            String?
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  providers        ProviderOrganization[]
+  enrollments      PayerEnrollment[]
+
+  @@index([name])
+  @@index([status])
+  @@map("organizations")
+}
+
+model ProviderOrganization {
+  id             String       @id @default(uuid()) @db.Uuid
+  providerId     String       @map("provider_id") @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  isPrimary      Boolean      @default(false) @map("is_primary")
+  employmentType String?      @map("employment_type") @db.VarChar(50)
+  startDate      DateTime?    @map("start_date") @db.Date
+  endDate        DateTime?    @map("end_date") @db.Date
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+
+  provider       Provider     @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, organizationId])
+  @@index([providerId])
+  @@index([organizationId])
+  @@map("provider_organizations")
+}

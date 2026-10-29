@@ -520,7 +520,7 @@ export async function runOverdueTaskScanner() {
       await dispatchNotification({
         userId: task.assignedToId,
         type: 'task_due',
-        title: `Overdue Task: "${task.title}"`,
+        title: 'Overdue Task Alert',
         message: `Task is past due (Due: ${task.dueDate?.toISOString().slice(0, 10)}). Priority: ${task.priority.toUpperCase()}.`,
         entityType: 'task',
         entityId: task.id,

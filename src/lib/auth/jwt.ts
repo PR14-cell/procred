@@ -2,7 +2,12 @@ import { SignJWT, jwtVerify } from 'jose';
 import { UserRole } from '@prisma/client';
 import { getJwtSecret } from '@/lib/auth/secrets';
 
-export type AuthStage = 'mfa_pending' | 'mfa_enrollment_required' | 'authenticated';
+export type AuthStage =
+  | 'mfa_pending'
+  | 'mfa_enrollment_required'
+  | 'mfa_enrollment_optional'
+  | 'password_change_required'
+  | 'authenticated';
 
 export interface UserSessionPayload {
   userId: string;
@@ -31,15 +36,15 @@ export async function createSessionToken(
 }
 
 /**
- * Creates a short-lived (10-minute) pre-authentication challenge token for MFA.
+ * Creates a short-lived (15-minute) pre-authentication challenge token for MFA or password change.
  * This token CANNOT be used to access protected APIs or dashboard routes.
  */
 export async function createPreAuthToken(
   payload: Omit<UserSessionPayload, 'authStage' | 'sessionId'> & {
     sessionId?: string;
-    authStage: 'mfa_pending' | 'mfa_enrollment_required';
+    authStage: 'mfa_pending' | 'mfa_enrollment_required' | 'mfa_enrollment_optional' | 'password_change_required';
   },
-  expiresIn = '10m'
+  expiresIn = '15m'
 ): Promise<string> {
   const finalPayload: UserSessionPayload = {
     ...payload,

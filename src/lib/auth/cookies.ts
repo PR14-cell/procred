@@ -4,10 +4,10 @@
  */
 
 export function isSecureContext(req?: Request): boolean {
-  if (process.env.COOKIE_SECURE === 'false') {
+  if (process.env.NODE_ENV !== 'production' && process.env.COOKIE_SECURE === 'false') {
     return false;
   }
-  if (process.env.COOKIE_SECURE === 'true') {
+  if (process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production') {
     return true;
   }
 
@@ -41,7 +41,7 @@ export function isSecureContext(req?: Request): boolean {
     return true;
   }
 
-  return process.env.NODE_ENV === 'production';
+  return false;
 }
 
 export interface SessionCookieOptions {

@@ -235,6 +235,7 @@ export default function ProviderProfilePage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'organizations' | 'specialties' | 'locations' | 'credentials' | 'enrollments' | 'documents' | 'tasks' | 'notes' | 'audit'>('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
 
   // Reveal SSN state
   const [revealingSsn, setRevealingSsn] = useState(false);
@@ -252,12 +253,25 @@ export default function ProviderProfilePage() {
   const [showAddSpecialtyModal, setShowAddSpecialtyModal] = useState(false);
   const [allTaxonomies, setAllTaxonomies] = useState<TaxonomyCode[]>([]);
   const [newSpecialtyCode, setNewSpecialtyCode] = useState('');
+  const [specialtyEntryMode, setSpecialtyEntryMode] = useState<'taxonomy' | 'manual'>('taxonomy');
+  const [newSpecialtyName, setNewSpecialtyName] = useState('');
   const [newSpecialtyPrimary, setNewSpecialtyPrimary] = useState(false);
 
   // Link Location Modal
   const [showLinkLocationModal, setShowLinkLocationModal] = useState(false);
   const [allLocations, setAllLocations] = useState<Array<{ id: string; name: string; city: string; state: string }>>([]);
   const [newLocationId, setNewLocationId] = useState('');
+  const [locationEntryMode, setLocationEntryMode] = useState<'existing' | 'manual'>('existing');
+  const [newLocationDetails, setNewLocationDetails] = useState({
+    name: '',
+    address1: '',
+    address2: '',
+    city: '',
+    state: '',
+    zipCode: '',
+    phone: '',
+    fax: '',
+  });
   const [newLocationPrimary, setNewLocationPrimary] = useState(false);
 
   // Phase 3 Credential Modals & State
@@ -290,9 +304,16 @@ export default function ProviderProfilePage() {
     try {
       setLoading(true);
       setError(null);
+      setNotFound(false);
       const res = await fetch(`/api/v1/providers/${providerId}`);
       if (!res.ok) {
-        throw new Error('Failed to load provider profile');
+        const data = await res.json().catch(() => null);
+        setNotFound(res.status === 404);
+        throw new Error(
+          typeof data?.message === 'string'
+            ? data.message
+            : `Failed to load provider profile (HTTP ${res.status})`
+        );
       }
       const data = await res.json();
       setProvider(data.provider);
@@ -507,7 +528,9 @@ export default function ProviderProfilePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          taxonomyCode: newSpecialtyCode,
+          ...(specialtyEntryMode === 'taxonomy'
+            ? { taxonomyCode: newSpecialtyCode }
+            : { specialtyName: newSpecialtyName }),
           isPrimary: newSpecialtyPrimary,
         }),
       });
@@ -515,6 +538,8 @@ export default function ProviderProfilePage() {
       if (!res.ok) throw new Error(data.message || 'Failed to add specialty');
       setShowAddSpecialtyModal(false);
       setNewSpecialtyCode('');
+      setSpecialtyEntryMode('taxonomy');
+      setNewSpecialtyName('');
       setNewSpecialtyPrimary(false);
       fetchProvider();
     } catch (err: unknown) {
@@ -545,7 +570,14 @@ export default function ProviderProfilePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          locationId: newLocationId,
+          ...(locationEntryMode === 'existing'
+            ? { locationId: newLocationId }
+            : {
+                newLocation: {
+                  ...newLocationDetails,
+                  state: newLocationDetails.state.toUpperCase(),
+                },
+              }),
           isPrimary: newLocationPrimary,
         }),
       });
@@ -553,6 +585,17 @@ export default function ProviderProfilePage() {
       if (!res.ok) throw new Error(data.message || 'Failed to link location');
       setShowLinkLocationModal(false);
       setNewLocationId('');
+      setLocationEntryMode('existing');
+      setNewLocationDetails({
+        name: '',
+        address1: '',
+        address2: '',
+        city: '',
+        state: '',
+        zipCode: '',
+        phone: '',
+        fax: '',
+      });
       setNewLocationPrimary(false);
       fetchProvider();
     } catch (err: unknown) {
@@ -753,7 +796,9 @@ export default function ProviderProfilePage() {
   if (error || !provider) {
     return (
       <div className="p-6 bg-red-50 border border-red-200 text-red-700 rounded-xl">
-        <h2 className="font-bold text-base mb-1">Provider Not Found</h2>
+        <h2 className="font-bold text-base mb-1">
+          {notFound ? 'Provider Not Found' : 'Failed to Load Provider'}
+        </h2>
         <p className="text-sm">{error || 'The requested provider could not be found.'}</p>
         <Link href="/providers" className="mt-4 inline-block text-xs font-semibold text-blue-600 hover:underline">
           ← Return to Provider Directory
@@ -1365,7 +1410,10 @@ export default function ProviderProfilePage() {
               <p className="text-xs text-slate-500">Facilities and practice clinics where this provider offers patient care</p>
             </div>
             <button
-              onClick={() => setShowLinkLocationModal(true)}
+              onClick={() => {
+                loadLookups();
+                setShowLinkLocationModal(true);
+              }}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition"
             >
               + Link Location
@@ -2278,6 +2326,20 @@ export default function ProviderProfilePage() {
             <form onSubmit={handleAddSpecialty} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Specialty Entry
+                </label>
+                <select
+                  value={specialtyEntryMode}
+                  onChange={(e) => setSpecialtyEntryMode(e.target.value === 'manual' ? 'manual' : 'taxonomy')}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                >
+                  <option value="taxonomy">Select from taxonomy directory</option>
+                  <option value="manual">Enter manually</option>
+                </select>
+              </div>
+              {specialtyEntryMode === 'taxonomy' ? (
+                <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Taxonomy Specialty Code *
                 </label>
                 <select
@@ -2293,7 +2355,25 @@ export default function ProviderProfilePage() {
                     </option>
                   ))}
                 </select>
-              </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Specialty Name *
+                  </label>
+                  <input
+                    required
+                    maxLength={255}
+                    value={newSpecialtyName}
+                    onChange={(e) => setNewSpecialtyName(e.target.value)}
+                    placeholder="Enter specialty name"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Manual specialties are added to the shared specialty directory.
+                  </p>
+                </div>
+              )}
 
               <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer">
                 <input
@@ -2328,10 +2408,24 @@ export default function ProviderProfilePage() {
       {/* Modal: Link Location */}
       {showLinkLocationModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 border border-slate-200">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 border border-slate-200 max-h-[90vh] overflow-y-auto">
             <h3 className="text-base font-bold text-slate-900 mb-3">Link Practice Location</h3>
             <form onSubmit={handleLinkLocation} className="space-y-4">
               <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Location Entry
+                </label>
+                <select
+                  value={locationEntryMode}
+                  onChange={(e) => setLocationEntryMode(e.target.value === 'manual' ? 'manual' : 'existing')}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                >
+                  <option value="existing">Select an existing location</option>
+                  <option value="manual">Enter a new location</option>
+                </select>
+              </div>
+              {locationEntryMode === 'existing' ? (
+                <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Practice Location *
                 </label>
@@ -2348,7 +2442,90 @@ export default function ProviderProfilePage() {
                     </option>
                   ))}
                 </select>
-              </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="block text-xs font-semibold text-slate-700 sm:col-span-2">
+                    Location Name *
+                    <input
+                      required
+                      maxLength={255}
+                      value={newLocationDetails.name}
+                      onChange={(e) => setNewLocationDetails({ ...newLocationDetails, name: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-normal"
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-700 sm:col-span-2">
+                    Street Address *
+                    <input
+                      required
+                      maxLength={255}
+                      value={newLocationDetails.address1}
+                      onChange={(e) => setNewLocationDetails({ ...newLocationDetails, address1: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-normal"
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-700 sm:col-span-2">
+                    Address Line 2
+                    <input
+                      maxLength={255}
+                      value={newLocationDetails.address2}
+                      onChange={(e) => setNewLocationDetails({ ...newLocationDetails, address2: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-normal"
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    City *
+                    <input
+                      required
+                      maxLength={100}
+                      value={newLocationDetails.city}
+                      onChange={(e) => setNewLocationDetails({ ...newLocationDetails, city: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-normal"
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    State *
+                    <input
+                      required
+                      minLength={2}
+                      maxLength={2}
+                      value={newLocationDetails.state}
+                      onChange={(e) => setNewLocationDetails({ ...newLocationDetails, state: e.target.value.toUpperCase() })}
+                      className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-normal uppercase"
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    ZIP Code *
+                    <input
+                      required
+                      minLength={5}
+                      maxLength={10}
+                      value={newLocationDetails.zipCode}
+                      onChange={(e) => setNewLocationDetails({ ...newLocationDetails, zipCode: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-normal"
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Phone
+                    <input
+                      maxLength={20}
+                      value={newLocationDetails.phone}
+                      onChange={(e) => setNewLocationDetails({ ...newLocationDetails, phone: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-normal"
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Fax
+                    <input
+                      maxLength={20}
+                      value={newLocationDetails.fax}
+                      onChange={(e) => setNewLocationDetails({ ...newLocationDetails, fax: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-normal"
+                    />
+                  </label>
+                </div>
+              )}
 
               <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer">
                 <input
@@ -2372,7 +2549,7 @@ export default function ProviderProfilePage() {
                   type="submit"
                   className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg"
                 >
-                  Link Location
+                  {locationEntryMode === 'manual' ? 'Create & Link Location' : 'Link Location'}
                 </button>
               </div>
             </form>

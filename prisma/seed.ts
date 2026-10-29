@@ -16,30 +16,32 @@ function encryptSeed(plaintext: string): Buffer {
 }
 
 async function main() {
-  console.log('Seeding Phase 1 foundation data (fictional-only)...');
+  console.log('Seeding fresh testing installation foundation data...');
 
-  // 1. Create Default Super Admin (Fictional credentials)
-  const adminEmail = 'admin@example.com';
-  const adminPasswordHash = await bcrypt.hash('AdminSecret2026!', 12);
-  const demoTotpSecret = 'JBSWY3DPEHPK3PXP'; // Base32 test secret
-  const demoBackupCodes = ['A1B2-C3D4', 'E5F6-G7H8', 'J9K0-L1M2', 'N3P4-Q5R6'];
+  // 1. Create Default Initial Testing Super Admin (Requires immediate password change)
+  const tempPassword = process.env.TESTING_BOOTSTRAP_PASSWORD || 'admin';
+  const adminPasswordHash = await bcrypt.hash(tempPassword, 12);
 
   const adminUser = await prisma.user.upsert({
-    where: { email: adminEmail },
-    update: {},
-    create: {
-      email: adminEmail,
+    where: { email: 'admin' },
+    update: {
       passwordHash: adminPasswordHash,
-      firstName: 'System',
+      mustChangePassword: true,
+      isActive: true,
+      mfaEnabled: false,
+    },
+    create: {
+      email: 'admin',
+      passwordHash: adminPasswordHash,
+      firstName: 'Testing',
       lastName: 'Administrator',
       role: UserRole.super_admin,
       isActive: true,
+      mustChangePassword: true,
       mfaEnabled: false,
-      totpSecretEncrypted: encryptSeed(demoTotpSecret),
-      mfaBackupCodesEncrypted: encryptSeed(JSON.stringify(demoBackupCodes)),
     },
   });
-  console.log(`✓ Super Admin seeded: ${adminUser.email}`);
+  console.log(`✓ Initial Testing Administrator seeded: ${adminUser.email} (mustChangePassword: true)`);
 
   // 2. Seed Standard Public Healthcare Taxonomy Codes (Public Data - Not PHI)
   const taxonomyData = [

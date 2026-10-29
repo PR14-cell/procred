@@ -57,38 +57,18 @@ The system automates and streamlines complex healthcare administration workflows
 - Git
 
 ### Local Setup
-1. Clone the repository:
-   ```bash
-   git clone <repo-url>
-   cd "provider credentialing"
+1. Copy `.env.example` to `.env` and replace all `CHANGE_ME` and `REPLACE_WITH` values with unique local secrets. Preserve the same `ENCRYPTION_KEY` when reusing local data.
+2. Build and start the complete stack from the project root:
+   ```powershell
+   docker compose -f compose.yaml -f compose.local.yaml up --build -d
    ```
-
-2. Copy environment file:
-   ```bash
-   cp .env.example .env
+3. Check startup and database migration status:
+   ```powershell
+   docker compose ps
+   docker compose logs --tail=50 migration app worker
+   Invoke-RestMethod http://localhost:3000/api/health
    ```
-
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-4. Start Docker backing services (PostgreSQL, Redis, MinIO):
-   ```bash
-   docker compose up -d postgres redis minio
-   ```
-
-5. Run database migrations and seed baseline taxonomies:
-   ```bash
-   npx prisma db push
-   npm run db:seed
-   ```
-
-6. Start local development server:
-   ```bash
-   npm run dev
-   ```
-   Access the web application at `http://localhost:3000`.
+   The local Compose overlay builds app, worker, and migration images from source. PostgreSQL, Redis, MinIO, and backup archives use named volumes.
 
 ---
 

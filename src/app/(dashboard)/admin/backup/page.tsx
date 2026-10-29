@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 
 interface BackupItem {
   id: string;
@@ -157,6 +158,33 @@ export default function BackupRestorePage() {
 
   return (
     <div className="space-y-6">
+      {/* System Administration Announcement Banner */}
+      <div className="bg-gradient-to-r from-blue-900 to-indigo-950 border border-blue-700/50 rounded-xl p-4 text-white shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center space-x-3.5">
+          <div className="w-10 h-10 rounded-lg bg-blue-600/40 border border-blue-400/30 flex items-center justify-center text-xl shrink-0">
+            ⚙️
+          </div>
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="font-semibold text-sm text-blue-100">Looking for Complete ZIP Portability & Application Reset?</span>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-blue-500/30 text-blue-300 border border-blue-400/30">
+                Recommended
+              </span>
+            </div>
+            <p className="text-xs text-blue-200/80 mt-0.5">
+              Access the new System Administration & Data Portability Center with multi-stage ZIP restore, validation preview, selective import, and verified reset safety controls.
+            </p>
+          </div>
+        </div>
+        <Link
+          href="/admin/system"
+          className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 bg-blue-500 hover:bg-blue-400 text-white text-xs font-semibold rounded-lg shadow transition shrink-0"
+        >
+          <span>Open System Administration</span>
+          <span>→</span>
+        </Link>
+      </div>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

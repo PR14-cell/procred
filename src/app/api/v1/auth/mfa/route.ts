@@ -31,7 +31,11 @@ const mfaActionSchema = z.object({
  * Rejects already-'authenticated' sessions.
  */
 export const GET = withErrorHandler(async (req: Request) => {
-  const session = await requirePreAuthSession(req, ['mfa_pending', 'mfa_enrollment_required']);
+  const session = await requirePreAuthSession(req, [
+    'mfa_pending',
+    'mfa_enrollment_required',
+    'mfa_enrollment_optional',
+  ]);
   if (!session) {
     throw ApiError.unauthorized('MFA pre-authentication challenge session is missing or expired. Please log in again.');
   }
@@ -46,8 +50,8 @@ export const GET = withErrorHandler(async (req: Request) => {
     throw ApiError.forbidden('MFA enrollment is not allowed when MFA is already configured.');
   }
 
-  // Allowed ONLY when session.authStage === 'mfa_enrollment_required'
-  if (session.authStage !== 'mfa_enrollment_required') {
+  // Allowed when session.authStage === 'mfa_enrollment_required' or 'mfa_enrollment_optional'
+  if (session.authStage !== 'mfa_enrollment_required' && session.authStage !== 'mfa_enrollment_optional') {
     throw ApiError.forbidden('MFA enrollment requires enrollment challenge stage.');
   }
 
@@ -77,6 +81,7 @@ export const GET = withErrorHandler(async (req: Request) => {
   return NextResponse.json({
     secret,
     qrCodeDataUrl,
+    backupCodes: generateBackupCodes(10),
   });
 });
 
@@ -92,7 +97,11 @@ export const POST = withErrorHandler(async (req: Request) => {
   const ipAddress = getClientIp(req);
   const userAgent = req.headers.get('user-agent') || 'unknown';
 
-  const session = await requirePreAuthSession(req, ['mfa_pending', 'mfa_enrollment_required']);
+  const session = await requirePreAuthSession(req, [
+    'mfa_pending',
+    'mfa_enrollment_required',
+    'mfa_enrollment_optional',
+  ]);
   if (!session) {
     throw ApiError.unauthorized('MFA pre-authentication challenge session is missing or expired. Please log in again.');
   }
@@ -159,9 +168,11 @@ export const POST = withErrorHandler(async (req: Request) => {
     throw ApiError.unauthorized('Invalid or expired verification code.');
   };
 
-  // Enrollment branch allowed ONLY when session.authStage === 'mfa_enrollment_required' AND user.mfaEnabled === false
+  // Enrollment branch allowed when (session.authStage === 'mfa_enrollment_required' || session.authStage === 'mfa_enrollment_optional') AND user.mfaEnabled === false
   // For 'mfa_pending' sessions, always use verification flow against stored totpSecretEncrypted, never pending secret
-  const isEnrolling = session.authStage === 'mfa_enrollment_required' && user.mfaEnabled === false;
+  const isEnrolling =
+    (session.authStage === 'mfa_enrollment_required' || session.authStage === 'mfa_enrollment_optional') &&
+    user.mfaEnabled === false;
 
   let generatedRecoveryCodes: string[] | undefined = undefined;
 
@@ -336,7 +347,7 @@ export const POST = withErrorHandler(async (req: Request) => {
   });
 
   // Set the full authenticated session cookie
-  response.cookies.set('session_token', jwtToken, getSessionCookieOptions(req, expiresAt));
+  response.cookies.set('session_token', jwtToken, getSessionCookieOptions(req));
 
   // Clear the ephemeral pre-auth token cookie
   response.cookies.delete('mfa_preauth_token');
