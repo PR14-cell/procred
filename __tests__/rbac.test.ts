@@ -11,11 +11,12 @@ describe('RBAC Middleware & Permissions Foundation', () => {
     expect(hasPermission(UserRole.super_admin, 'audit:read')).toBe(true);
   });
 
-  it('should prevent credentialing_specialist from managing users or altering payer enrollments directly', () => {
+  it('should allow credentialing_specialist to register payers without managing payer enrollments', () => {
     expect(hasPermission(UserRole.credentialing_specialist, 'users:manage')).toBe(false);
     expect(hasPermission(UserRole.credentialing_specialist, 'enrollments:read')).toBe(true);
     expect(hasPermission(UserRole.credentialing_specialist, 'enrollments:write')).toBe(false);
     expect(hasPermission(UserRole.credentialing_specialist, 'payers:read')).toBe(true);
+    expect(hasPermission(UserRole.credentialing_specialist, 'payers:write')).toBe(true);
     expect(hasPermission(UserRole.credentialing_specialist, 'documents:delete')).toBe(false);
     expect(hasPermission(UserRole.credentialing_specialist, 'credentials:write')).toBe(true);
     expect(hasPermission(UserRole.credentialing_specialist, 'providers:read')).toBe(true);

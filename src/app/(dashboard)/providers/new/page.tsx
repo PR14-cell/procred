@@ -96,6 +96,11 @@ export default function NewProviderPage() {
   const [selectedSpecialties, setSelectedSpecialties] = useState<
     Array<{ taxonomyCode: string; isPrimary: boolean }>
   >([]);
+  const [manualPrimaryCode, setManualPrimaryCode] = useState('');
+  const [manualPrimaryName, setManualPrimaryName] = useState('');
+  const [manualSpecialtyCode, setManualSpecialtyCode] = useState('');
+  const [manualSpecialtyName, setManualSpecialtyName] = useState('');
+  const [manualTaxonomySaving, setManualTaxonomySaving] = useState(false);
 
   // Selected locations
   const [selectedLocations, setSelectedLocations] = useState<
@@ -108,6 +113,10 @@ export default function NewProviderPage() {
   const [currentEnrollmentType, setCurrentEnrollmentType] = useState<'individual' | 'group'>('individual');
   const [currentStatus, setCurrentStatus] = useState('not_started');
   const [payerSearch, setPayerSearch] = useState('');
+  const [showNewPayerForm, setShowNewPayerForm] = useState(false);
+  const [newPayerForm, setNewPayerForm] = useState({ name: '', shortName: '', payerType: 'commercial' });
+  const [payerCreating, setPayerCreating] = useState(false);
+  const [payerCreateError, setPayerCreateError] = useState<string | null>(null);
 
   // New location inline modal
   const [showNewLocationModal, setShowNewLocationModal] = useState(false);
@@ -181,6 +190,117 @@ export default function NewProviderPage() {
 
   const handleRemovePayer = (payerId: string) => {
     setSelectedPayers((prev) => prev.filter((sp) => sp.payerId !== payerId));
+  };
+
+  const resolveManualTaxonomy = async (code: string, specialtyName: string) => {
+    const res = await fetch('/api/v1/taxonomy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: code.trim() || undefined,
+        classification: 'Custom',
+        specialization: specialtyName.trim(),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Failed to save the taxonomy entry.');
+
+    const taxonomy = data.taxonomyCode as TaxonomyOption;
+    setTaxonomies((prev) =>
+      prev.some((item) => item.code === taxonomy.code) ? prev : [...prev, taxonomy]
+    );
+    return taxonomy;
+  };
+
+  const handleAddManualPrimary = async () => {
+    if (!manualPrimaryName.trim()) {
+      setError('Enter a clinical specialty name for the manual primary taxonomy.');
+      return;
+    }
+
+    try {
+      setManualTaxonomySaving(true);
+      setError(null);
+      const taxonomy = await resolveManualTaxonomy(manualPrimaryCode, manualPrimaryName);
+      setFormData((prev) => ({
+        ...prev,
+        primaryTaxonomy: taxonomy.code,
+        taxonomyDescription: taxonomy.specialization || taxonomy.classification,
+      }));
+      setSelectedSpecialties((prev) => [
+        ...prev.map((specialty) => ({ ...specialty, isPrimary: specialty.taxonomyCode === taxonomy.code })),
+        ...(prev.some((specialty) => specialty.taxonomyCode === taxonomy.code)
+          ? []
+          : [{ taxonomyCode: taxonomy.code, isPrimary: true }]),
+      ]);
+      setManualPrimaryCode('');
+      setManualPrimaryName('');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save the taxonomy entry.');
+    } finally {
+      setManualTaxonomySaving(false);
+    }
+  };
+
+  const handleAddManualSpecialty = async () => {
+    if (!manualSpecialtyName.trim()) {
+      setError('Enter a clinical specialty name.');
+      return;
+    }
+
+    try {
+      setManualTaxonomySaving(true);
+      setError(null);
+      const taxonomy = await resolveManualTaxonomy(manualSpecialtyCode, manualSpecialtyName);
+      const isFirstSpecialty = selectedSpecialties.length === 0;
+      setSelectedSpecialties((prev) =>
+        prev.some((specialty) => specialty.taxonomyCode === taxonomy.code)
+          ? prev
+          : [...prev, { taxonomyCode: taxonomy.code, isPrimary: prev.length === 0 }]
+      );
+      if (isFirstSpecialty) {
+        setFormData((prev) => ({
+          ...prev,
+          primaryTaxonomy: prev.primaryTaxonomy || taxonomy.code,
+          taxonomyDescription: prev.taxonomyDescription || taxonomy.specialization || taxonomy.classification,
+        }));
+      }
+      setManualSpecialtyCode('');
+      setManualSpecialtyName('');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save the specialty.');
+    } finally {
+      setManualTaxonomySaving(false);
+    }
+  };
+
+  const handleCreatePayer = async () => {
+    setPayerCreateError(null);
+    try {
+      setPayerCreating(true);
+      const res = await fetch('/api/v1/payers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newPayerForm.name.trim(),
+          shortName: newPayerForm.shortName.trim() || null,
+          payerType: newPayerForm.payerType,
+          isActive: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Failed to register payer.');
+
+      setPayers((prev) => [...prev, data.payer]);
+      setCurrentPayerId(data.payer.id);
+      setPayerSearch('');
+      setShowNewPayerForm(false);
+      setNewPayerForm({ name: '', shortName: '', payerType: 'commercial' });
+    } catch (err: unknown) {
+      setPayerCreateError(err instanceof Error ? err.message : 'Failed to register payer.');
+    } finally {
+      setPayerCreating(false);
+    }
   };
 
   const handleTaxonomyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -362,6 +482,18 @@ export default function NewProviderPage() {
       setSubmitting(false);
     }
   };
+
+  const payerSearchTerm = payerSearch.trim().toLowerCase();
+  const matchingPayers = payers.filter((payer) =>
+    !payerSearchTerm ||
+    payer.name.toLowerCase().includes(payerSearchTerm) ||
+    Boolean(payer.shortName?.toLowerCase().includes(payerSearchTerm)) ||
+    Boolean(payer.state?.toLowerCase().includes(payerSearchTerm))
+  );
+  const availablePayers = matchingPayers.filter(
+    (payer) => !selectedPayers.some((selected) => selected.payerId === payer.id)
+  );
+  const noMatchingPayers = !loadingLookups && matchingPayers.length === 0;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-12">

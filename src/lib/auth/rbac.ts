@@ -92,6 +92,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'credentials:write',
     'enrollments:read',
     'payers:read',
+    'payers:write',
     'organizations:read',
     'organizations:write',
     'documents:read',

@@ -3,7 +3,8 @@ import { prisma } from '../src/lib/db/prisma';
 import { UserRole } from '@prisma/client';
 import { createSessionToken } from '../src/lib/auth/jwt';
 import { POST as createProviderRoute } from '../src/app/api/v1/providers/route';
-import { GET as getPayersRoute } from '../src/app/api/v1/payers/route';
+import { GET as getPayersRoute, POST as createPayerRoute } from '../src/app/api/v1/payers/route';
+import { POST as createTaxonomyRoute } from '../src/app/api/v1/taxonomy/route';
 import { GET as getEnrollmentsRoute } from '../src/app/api/v1/enrollments/route';
 import { decrypt } from '../src/lib/encryption/aes';
 
@@ -20,6 +21,8 @@ describe('UAT Improvement: Payor Association in Provider Onboarding', () => {
   let testPayer2: any;
   let testLocation: any;
   let testTaxonomy: any;
+  let inlinePayerId: string | null = null;
+  const manualTaxonomyCodes: string[] = [];
 
   const testProviderIds: string[] = [];
 
@@ -184,7 +187,69 @@ describe('UAT Improvement: Payor Association in Provider Onboarding', () => {
       await prisma.location.deleteMany({ where: { id: testLocation.id } });
     }
 
+    if (inlinePayerId) {
+      await prisma.payer.deleteMany({ where: { id: inlinePayerId } });
+    }
+    if (manualTaxonomyCodes.length > 0) {
+      await prisma.taxonomyCode.deleteMany({ where: { code: { in: manualTaxonomyCodes } } });
+    }
+
     await prisma.$disconnect();
+  });
+
+  it('creates and reuses manually entered taxonomy codes and specialties', async () => {
+    const manualRequest = (payload: Record<string, string>) => new Request('http://localhost/api/v1/taxonomy', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        cookie: `session_token=${superAdminToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const manualResponse = await createTaxonomyRoute(manualRequest({
+      code: 'ONBOARDING-MANUAL-01',
+      classification: 'Custom',
+      specialization: 'Onboarding Manual Specialty',
+    }));
+    expect(manualResponse.status).toBe(201);
+    const manualBody = await manualResponse.json();
+    manualTaxonomyCodes.push(manualBody.taxonomyCode.code);
+
+    const repeatedResponse = await createTaxonomyRoute(manualRequest({
+      code: 'ONBOARDING-MANUAL-01',
+      classification: 'Custom',
+      specialization: 'Onboarding Manual Specialty',
+    }));
+    expect(repeatedResponse.status).toBe(200);
+    expect((await repeatedResponse.json()).taxonomyCode.code).toBe(manualBody.taxonomyCode.code);
+
+    const namedRequest = { classification: 'Custom', specialization: 'Reusable Onboarding Specialty' };
+    const namedResponse = await createTaxonomyRoute(manualRequest(namedRequest));
+    expect(namedResponse.status).toBe(201);
+    const namedBody = await namedResponse.json();
+    manualTaxonomyCodes.push(namedBody.taxonomyCode.code);
+
+    const repeatedNamedResponse = await createTaxonomyRoute(manualRequest(namedRequest));
+    expect(repeatedNamedResponse.status).toBe(200);
+    expect((await repeatedNamedResponse.json()).taxonomyCode.code).toBe(namedBody.taxonomyCode.code);
+  });
+
+  it('allows a provider onboarding user to register a payer through the existing payer API', async () => {
+    const req = new Request('http://localhost/api/v1/payers', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        cookie: `session_token=${credSpecialistToken}`,
+      },
+      body: JSON.stringify({ name: 'Onboarding Inline Test Payer', payerType: 'other' }),
+    });
+
+    const res = await createPayerRoute(req);
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.payer.name).toBe('Onboarding Inline Test Payer');
+    inlinePayerId = body.payer.id;
   });
 
   // =========================================================================
